@@ -12,14 +12,17 @@ export type PresetRoutesDeps = {
   engine: ActivationEngine
   driver: SonosDriver
   cache: SourceCache
+  /** Lets the HomeKit bridge add, rename or drop switches as presets change. */
+  onPresetsChanged?: () => void
 }
 
 const idParamsSchema = z.object({ id: z.string().min(1) })
 
 export async function registerPresetRoutes(
   app: FastifyInstance,
-  { repo, engine, driver, cache }: PresetRoutesDeps,
+  { repo, engine, driver, cache, onPresetsChanged }: PresetRoutesDeps,
 ) {
+  const changed = () => onPresetsChanged?.()
   const zoneNames = () =>
     new Map(driver.snapshot().zones.map((zone) => [zone.id, zone.name] as const))
 
@@ -69,6 +72,7 @@ export async function registerPresetRoutes(
   app.post('/api/presets', async (request, reply) => {
     const input = presetInputSchema.parse(request.body)
     const preset = repo.create(input, zoneNames())
+    changed()
     // Warm the cache in the background so the first activation is instant.
     void warmSources(cache, preset)
     return reply.status(201).send({ preset: withSourceMeta(preset) })
@@ -79,6 +83,7 @@ export async function registerPresetRoutes(
     const input = presetInputSchema.parse(request.body)
     const preset = repo.update(id, input, zoneNames())
     if (!preset) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
+    changed()
     void warmSources(cache, preset)
     return { preset: withSourceMeta(preset) }
   })
@@ -88,6 +93,7 @@ export async function registerPresetRoutes(
     if (!repo.delete(id)) {
       return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
     }
+    changed()
     return reply.status(204).send()
   })
 

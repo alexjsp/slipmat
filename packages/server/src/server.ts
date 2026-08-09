@@ -7,6 +7,7 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify'
 import { ZodError } from 'zod'
 import type { Config } from './config.js'
 import { openDatabase } from './db/index.js'
+import type { HomeKitBridge } from './homekit/bridge.js'
 import type { Logger } from './logger.js'
 import { ActivationEngine } from './presets/activate.js'
 import { PresetRepository } from './presets/repository.js'
@@ -83,8 +84,35 @@ export async function buildServer({
   // a speaker reboots), so re-derive active state whenever anything changes.
   store.on('change', () => engine.reconcile())
 
-  await registerPresetRoutes(app, { repo, engine, driver, cache })
+  // Off unless DOMOVOI_HOMEKIT=1, and the HAP library is only imported when it
+  // is — so with the feature off nothing is advertised over mDNS at all.
+  let homekit: HomeKitBridge | undefined
+  if (config.homekit.enabled) {
+    try {
+      const { startHomeKitBridge } = await import('./homekit/bridge.js')
+      homekit = await startHomeKitBridge({ config, logger, repo, engine, driver, store })
+      app.addHook('onClose', async () => homekit?.stop())
+    } catch (err) {
+      // A HomeKit failure must not take the whole app down with it.
+      logger.error({ err }, 'HomeKit bridge failed to start; continuing without it')
+    }
+  }
+
+  await registerPresetRoutes(app, {
+    repo,
+    engine,
+    driver,
+    cache,
+    onPresetsChanged: () => homekit?.sync(),
+  })
   await registerWebhookRoutes(app, { repo, engine, driver, store, settings })
+
+  app.get('/api/homekit', async () => ({
+    enabled: config.homekit.enabled,
+    running: !!homekit,
+    pincode: homekit?.pincode ?? null,
+    setupUri: homekit?.setupUri() ?? null,
+  }))
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {

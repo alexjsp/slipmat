@@ -1,4 +1,4 @@
-import { ListMusic, Speaker } from 'lucide-react'
+import { ListMusic, Settings, Speaker } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Route, Switch, useLocation } from 'wouter'
 import { PauseAllButton } from '@/components/pause-all-button'
@@ -6,6 +6,7 @@ import { useSystemState } from '@/lib/system-state'
 import { cn } from '@/lib/utils'
 import { NowPlayingPage } from '@/pages/now-playing'
 import { PresetsPage } from '@/pages/presets'
+import { SettingsPage } from '@/pages/settings'
 
 export function App() {
   const { state, status } = useSystemState()
@@ -61,6 +62,9 @@ export function App() {
         <NavLink href="/presets" current={location} icon={<ListMusic className="size-4" />}>
           Presets
         </NavLink>
+        <NavLink href="/settings" current={location} icon={<Settings className="size-4" />}>
+          Settings
+        </NavLink>
       </nav>
 
       {error && (
@@ -80,6 +84,9 @@ export function App() {
           <Switch>
             <Route path="/presets">
               <PresetsPage zones={state.zones} onError={onError} />
+            </Route>
+            <Route path="/settings">
+              <SettingsPage />
             </Route>
             <Route>
               <NowPlayingPage state={state} onError={onError} />
