@@ -55,6 +55,33 @@ export type DriverEvents = {
   change: () => void
 }
 
+export type DriverBrowseItem = {
+  /** ContentDirectory object id (`SQ:3`, `A:ALBUM/…`) or a bare URI. */
+  id: string
+  title: string
+  subtitle: string | null
+  artUrl: string | null
+  isContainer: boolean
+  /** Playable resource, absent for pure containers. */
+  uri: string | null
+  /** DIDL-Lite metadata, needed verbatim when enqueueing. */
+  metadata: string | null
+}
+
+export type DriverBrowseResult = {
+  items: DriverBrowseItem[]
+  total: number
+}
+
+export type DriverMusicService = {
+  id: number
+  name: string
+  /** Account serial number; service URIs are invalid without it. */
+  serial: string
+}
+
+export type DriverPlayMode = 'NORMAL' | 'REPEAT_ALL' | 'SHUFFLE_NOREPEAT' | 'SHUFFLE'
+
 export interface SonosDriver {
   start(): Promise<void>
   stop(): Promise<void>
@@ -88,4 +115,32 @@ export interface SonosDriver {
    * the UI is reached over Tailscale or a reverse proxy.
    */
   fetchArt(zoneId: string, path: string): Promise<{ body: ArrayBuffer; contentType: string }>
+
+  // --- content (read-only) ------------------------------------------------
+
+  /** Browse the ContentDirectory: favourites, playlists, music library. */
+  browse(
+    objectId: string,
+    options?: { start?: number; count?: number },
+  ): Promise<DriverBrowseResult>
+
+  /** Services the household is signed in to, with the serials their URIs need. */
+  listMusicServices(): Promise<DriverMusicService[]>
+
+  // --- queue (mutating) ---------------------------------------------------
+
+  getQueue(zoneId: string): Promise<DriverBrowseItem[]>
+  clearQueue(zoneId: string): Promise<void>
+  /** Enqueue in order. Implementations batch to respect the SOAP payload limit. */
+  addUrisToQueue(zoneId: string, items: { uri: string; metadata?: string }[]): Promise<void>
+  /** Point the coordinator at its own queue. */
+  setTransportToQueue(zoneId: string): Promise<void>
+  /** Point the coordinator at a single URI — a radio stream, TV, or line-in. */
+  setTransportUri(zoneId: string, uri: string, metadata?: string): Promise<void>
+  setPlayMode(zoneId: string, mode: DriverPlayMode): Promise<void>
+  setCrossfade(zoneId: string, enabled: boolean): Promise<void>
+
+  /** Snapshot the queue to a Sonos playlist so it can be restored afterwards. */
+  saveQueue(zoneId: string, title: string): Promise<string>
+  removeSavedQueue(objectId: string): Promise<void>
 }

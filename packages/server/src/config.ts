@@ -23,6 +23,13 @@ const envSchema = z.object({
   DOMOVOI_CALLBACK_HOST: z.string().optional(),
   /** Run against the in-memory household instead of real speakers. */
   DOMOVOI_FAKE_SONOS: boolish,
+  /**
+   * Allow scratch-queue expansion of streaming containers. This temporarily
+   * replaces an idle speaker's queue (and restores it), so it is opt-in.
+   */
+  DOMOVOI_ALLOW_QUEUE_EXPANSION: boolish,
+  /** Zone to borrow for expansion. Unset picks any idle zone with no queue. */
+  DOMOVOI_UTILITY_ZONE: z.string().optional(),
 
   DOMOVOI_HOMEKIT: boolish,
   DOMOVOI_HOMEKIT_PIN: z.string().default('031-45-154'),
@@ -40,6 +47,8 @@ export type Config = {
   seedIp: string | undefined
   callbackHost: string | undefined
   fakeSonos: boolean
+  allowQueueExpansion: boolean
+  utilityZoneId: string | undefined
   homekit: { enabled: boolean; pin: string; name: string }
 }
 
@@ -59,6 +68,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     seedIp: parsed.DOMOVOI_SEED_IP,
     callbackHost: parsed.DOMOVOI_CALLBACK_HOST,
     fakeSonos: parsed.DOMOVOI_FAKE_SONOS,
+    allowQueueExpansion: parsed.DOMOVOI_ALLOW_QUEUE_EXPANSION,
+    utilityZoneId: parsed.DOMOVOI_UTILITY_ZONE,
     homekit: {
       enabled: parsed.DOMOVOI_HOMEKIT,
       pin: parsed.DOMOVOI_HOMEKIT_PIN,

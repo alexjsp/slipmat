@@ -1,7 +1,11 @@
 import { EventEmitter } from 'node:events'
 import type {
+  DriverBrowseItem,
+  DriverBrowseResult,
   DriverEvents,
   DriverGroup,
+  DriverMusicService,
+  DriverPlayMode,
   DriverSnapshot,
   DriverTrack,
   DriverZone,
@@ -38,7 +42,7 @@ type FakeGroup = {
   currentTrackUri: string | null
   currentTrack: DriverTrack | null
   positionSeconds: number | null
-  queue: string[]
+  queue: DriverBrowseItem[]
 }
 
 export type FakeSonosDriverOptions = {
@@ -62,6 +66,12 @@ export class FakeSonosDriver implements SonosDriver {
 
   /** Every command issued, so tests can assert on ordering and volume timing. */
   readonly calls: { method: string; args: unknown[] }[] = []
+
+  /** What each container URI expands into when enqueued. */
+  private readonly containers = new Map<string, DriverBrowseItem[]>()
+  private readonly browseTree = new Map<string, DriverBrowseItem[]>()
+  private readonly savedQueues = new Map<string, DriverBrowseItem[]>()
+  private readonly playModes = new Map<string, DriverPlayMode>()
 
   constructor(options: FakeSonosDriverOptions = {}) {
     const zones = options.zones ?? DEFAULT_ZONES
@@ -182,10 +192,10 @@ export class FakeSonosDriver implements SonosDriver {
   async next(zoneId: string): Promise<void> {
     this.record('next', zoneId)
     const group = this.groupFor(zoneId)
-    const index = group.queue.indexOf(group.currentTrackUri ?? '')
-    const nextUri = group.queue[index + 1]
-    if (nextUri) {
-      group.currentTrackUri = nextUri
+    const index = group.queue.findIndex((item) => item.uri === group.currentTrackUri)
+    const nextItem = group.queue[index + 1]
+    if (nextItem?.uri) {
+      group.currentTrackUri = nextItem.uri
       group.positionSeconds = 0
     }
     this.changed()
@@ -194,10 +204,10 @@ export class FakeSonosDriver implements SonosDriver {
   async previous(zoneId: string): Promise<void> {
     this.record('previous', zoneId)
     const group = this.groupFor(zoneId)
-    const index = group.queue.indexOf(group.currentTrackUri ?? '')
-    const prevUri = index > 0 ? group.queue[index - 1] : undefined
-    if (prevUri) {
-      group.currentTrackUri = prevUri
+    const index = group.queue.findIndex((item) => item.uri === group.currentTrackUri)
+    const prevItem = index > 0 ? group.queue[index - 1] : undefined
+    if (prevItem?.uri) {
+      group.currentTrackUri = prevItem.uri
       group.positionSeconds = 0
     }
     this.changed()
@@ -282,6 +292,102 @@ export class FakeSonosDriver implements SonosDriver {
     return { body: new ArrayBuffer(0), contentType: 'image/jpeg' }
   }
 
+  // --- content ------------------------------------------------------------
+
+  async browse(
+    objectId: string,
+    options: { start?: number; count?: number } = {},
+  ): Promise<DriverBrowseResult> {
+    const all = this.browseTree.get(objectId) ?? []
+    const start = options.start ?? 0
+    const count = options.count ?? 200
+    return { items: all.slice(start, start + count), total: all.length }
+  }
+
+  async listMusicServices(): Promise<DriverMusicService[]> {
+    return [{ id: 9, name: 'Spotify', serial: '7' }]
+  }
+
+  // --- queue --------------------------------------------------------------
+
+  async getQueue(zoneId: string): Promise<DriverBrowseItem[]> {
+    return [...this.groupFor(zoneId).queue]
+  }
+
+  async clearQueue(zoneId: string): Promise<void> {
+    this.record('clearQueue', zoneId)
+    this.groupFor(zoneId).queue = []
+    this.changed()
+  }
+
+  async addUrisToQueue(zoneId: string, items: { uri: string; metadata?: string }[]): Promise<void> {
+    this.record('addUrisToQueue', zoneId, items.length)
+    const group = this.groupFor(zoneId)
+    for (const item of items) {
+      // A real speaker expands a container URI into its individual tracks.
+      // That expansion is exactly what the resolver leans on, so model it.
+      const expansion = this.containers.get(item.uri)
+      if (expansion) {
+        group.queue.push(...expansion)
+      } else {
+        group.queue.push({
+          id: item.uri,
+          title: item.uri,
+          subtitle: null,
+          artUrl: null,
+          isContainer: false,
+          uri: item.uri,
+          metadata: item.metadata ?? null,
+        })
+      }
+    }
+    this.changed()
+  }
+
+  async setTransportToQueue(zoneId: string): Promise<void> {
+    this.record('setTransportToQueue', zoneId)
+    const group = this.groupFor(zoneId)
+    group.transportUri = `x-rincon-queue:${group.coordinatorZoneId}#0`
+    group.currentTrackUri = group.queue[0]?.uri ?? null
+    group.currentTrack = null
+    group.positionSeconds = 0
+    this.changed()
+  }
+
+  async setTransportUri(zoneId: string, uri: string): Promise<void> {
+    this.record('setTransportUri', zoneId, uri)
+    const group = this.groupFor(zoneId)
+    group.transportUri = uri
+    group.currentTrackUri = uri
+    group.positionSeconds = null
+    this.changed()
+  }
+
+  async setPlayMode(zoneId: string, mode: DriverPlayMode): Promise<void> {
+    this.record('setPlayMode', zoneId, mode)
+    this.playModes.set(zoneId, mode)
+  }
+
+  async setCrossfade(zoneId: string, enabled: boolean): Promise<void> {
+    this.record('setCrossfade', zoneId, enabled)
+  }
+
+  async saveQueue(zoneId: string, title: string): Promise<string> {
+    this.record('saveQueue', zoneId, title)
+    const objectId = `SQ:${this.savedQueues.size + 90}`
+    this.savedQueues.set(objectId, [...this.groupFor(zoneId).queue])
+    return objectId
+  }
+
+  async removeSavedQueue(objectId: string): Promise<void> {
+    this.record('removeSavedQueue', objectId)
+    this.savedQueues.delete(objectId)
+  }
+
+  playModeOf(zoneId: string): DriverPlayMode | undefined {
+    return this.playModes.get(zoneId)
+  }
+
   // --- test helpers -------------------------------------------------------
 
   /** Simulate a speaker dropping off the network. */
@@ -314,13 +420,19 @@ export class FakeSonosDriver implements SonosDriver {
     this.changed()
   }
 
-  getQueue(zoneId: string): string[] {
-    return [...this.groupFor(zoneId).queue]
+  /** Inspect a queue synchronously — convenience for assertions. */
+  queueOf(zoneId: string): string[] {
+    return this.groupFor(zoneId)
+      .queue.map((item) => item.uri)
+      .filter((uri): uri is string => uri !== null)
   }
 
-  setQueue(zoneId: string, uris: string[]) {
-    const group = this.groupFor(zoneId)
-    group.queue = [...uris]
-    this.changed()
+  /** Register what a container expands into, so resolution can be tested. */
+  setContainerContents(containerUri: string, items: DriverBrowseItem[]) {
+    this.containers.set(containerUri, items)
+  }
+
+  setBrowseResult(objectId: string, items: DriverBrowseItem[]) {
+    this.browseTree.set(objectId, items)
   }
 }

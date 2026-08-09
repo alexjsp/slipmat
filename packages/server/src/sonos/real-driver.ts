@@ -1,13 +1,18 @@
 import { EventEmitter } from 'node:events'
 import type { SonosDevice } from '@svrooij/sonos'
-import { SonosManager } from '@svrooij/sonos'
+import { MetaDataHelper, SonosManager } from '@svrooij/sonos'
 import type { Track as SonosTrack } from '@svrooij/sonos/lib/models/index.js'
+import { PlayMode } from '@svrooij/sonos/lib/models/playmode.js'
 import type { ZoneGroup } from '@svrooij/sonos/lib/models/zone-group.js'
 import type { AVTransportServiceEvent } from '@svrooij/sonos/lib/services/index.js'
 import type { Logger } from '../logger.js'
 import type {
+  DriverBrowseItem,
+  DriverBrowseResult,
   DriverEvents,
   DriverGroup,
+  DriverMusicService,
+  DriverPlayMode,
   DriverSnapshot,
   DriverTrack,
   DriverZone,
@@ -15,7 +20,7 @@ import type {
 } from './driver.js'
 import { UnknownZoneError } from './errors.js'
 import { formatDuration, parseDuration } from './time.js'
-import { classifyPlaybackKind, followUriFor } from './uris.js'
+import { classifyPlaybackKind, followUriFor, queueUriFor } from './uris.js'
 
 /** UPnP subscriptions last ~10 minutes; renew comfortably inside that. */
 const SUBSCRIPTION_CHECK_MS = 4 * 60 * 1000
@@ -25,6 +30,15 @@ const TOPOLOGY_REFRESH_MS = 60 * 1000
 const POSITION_POLL_MS = 5 * 1000
 /** Grouping is eventually consistent — how long we wait for topology to settle. */
 const TOPOLOGY_SETTLE_TIMEOUT_MS = 5000
+/** AddMultipleURIsToQueue rejects payloads larger than this. */
+const ADD_BATCH_SIZE = 16
+
+const PLAY_MODES: Record<DriverPlayMode, PlayMode> = {
+  NORMAL: PlayMode.Normal,
+  REPEAT_ALL: PlayMode.RepeatAll,
+  SHUFFLE: PlayMode.Shuffle,
+  SHUFFLE_NOREPEAT: PlayMode.ShuffleNoRepeat,
+}
 
 type DeviceState = {
   volume: number
@@ -496,6 +510,123 @@ export class RealSonosDriver implements SonosDriver {
     this.logger.warn(context, 'topology did not settle within timeout; continuing anyway')
   }
 
+  // --- content (read-only) ------------------------------------------------
+
+  async browse(
+    objectId: string,
+    options: { start?: number; count?: number } = {},
+  ): Promise<DriverBrowseResult> {
+    const device = this.manager?.Devices[0]
+    if (!device) throw new Error('No Sonos devices available')
+
+    const response = await device.ContentDirectoryService.Browse({
+      ObjectID: objectId,
+      BrowseFlag: 'BrowseDirectChildren',
+      Filter: '*',
+      StartingIndex: options.start ?? 0,
+      RequestedCount: options.count ?? 200,
+      SortCriteria: '',
+    })
+
+    // The service parses DIDL for us when it can; a raw string means it didn't.
+    const tracks: SonosTrack[] = typeof response.Result === 'string' ? [] : response.Result
+    return {
+      items: tracks.map((track) => toBrowseItem(track, device.Host)),
+      total: response.TotalMatches ?? tracks.length,
+    }
+  }
+
+  async listMusicServices(): Promise<DriverMusicService[]> {
+    const device = this.manager?.Devices[0]
+    if (!device) return []
+    const services = await device.MusicServicesSubscribed()
+    return (services ?? []).map((service) => ({
+      id: Number(service.Id),
+      name: service.Name ?? String(service.Id),
+      serial: String(service.Id),
+    }))
+  }
+
+  // --- queue (mutating) ---------------------------------------------------
+
+  async getQueue(zoneId: string): Promise<DriverBrowseItem[]> {
+    const device = this.coordinatorFor(zoneId)
+    const response = await device.GetQueue()
+    const tracks: SonosTrack[] = typeof response.Result === 'string' ? [] : response.Result
+    return tracks.map((track) => toBrowseItem(track, device.Host))
+  }
+
+  async clearQueue(zoneId: string): Promise<void> {
+    await this.coordinatorFor(zoneId).AVTransportService.RemoveAllTracksFromQueue()
+  }
+
+  async addUrisToQueue(zoneId: string, items: { uri: string; metadata?: string }[]): Promise<void> {
+    const device = this.coordinatorFor(zoneId)
+    // AddMultipleURIsToQueue takes at most ~16 URIs per SOAP call, so a large
+    // preset is dozens of sequential round-trips. Callers enqueue a small head,
+    // start playback, then append the rest in the background.
+    for (let index = 0; index < items.length; index += ADD_BATCH_SIZE) {
+      const batch = items.slice(index, index + ADD_BATCH_SIZE)
+      await device.AVTransportService.AddMultipleURIsToQueue({
+        InstanceID: 0,
+        UpdateID: 0,
+        NumberOfURIs: batch.length,
+        EnqueuedURIs: batch.map((item) => item.uri).join(' '),
+        EnqueuedURIsMetaData: batch.map((item) => item.metadata ?? '').join(' '),
+        ContainerURI: '',
+        ContainerMetaData: '',
+        DesiredFirstTrackNumberEnqueued: 0,
+        EnqueueAsNext: false,
+      })
+    }
+  }
+
+  async setTransportToQueue(zoneId: string): Promise<void> {
+    const device = this.coordinatorFor(zoneId)
+    await device.AVTransportService.SetAVTransportURI({
+      InstanceID: 0,
+      CurrentURI: queueUriFor(device.Uuid),
+      CurrentURIMetaData: '',
+    })
+  }
+
+  async setTransportUri(zoneId: string, uri: string, metadata = ''): Promise<void> {
+    await this.coordinatorFor(zoneId).AVTransportService.SetAVTransportURI({
+      InstanceID: 0,
+      CurrentURI: uri,
+      CurrentURIMetaData: metadata,
+    })
+  }
+
+  async setPlayMode(zoneId: string, mode: DriverPlayMode): Promise<void> {
+    await this.coordinatorFor(zoneId).AVTransportService.SetPlayMode({
+      InstanceID: 0,
+      NewPlayMode: PLAY_MODES[mode],
+    })
+  }
+
+  async setCrossfade(zoneId: string, enabled: boolean): Promise<void> {
+    await this.coordinatorFor(zoneId).AVTransportService.SetCrossfadeMode({
+      InstanceID: 0,
+      CrossfadeMode: enabled,
+    })
+  }
+
+  async saveQueue(zoneId: string, title: string): Promise<string> {
+    const response = await this.coordinatorFor(zoneId).AVTransportService.SaveQueue({
+      InstanceID: 0,
+      Title: title,
+      ObjectID: '',
+    })
+    return response.AssignedObjectID
+  }
+
+  async removeSavedQueue(objectId: string): Promise<void> {
+    const device = this.manager?.Devices[0]
+    if (!device) return
+    await device.ContentDirectoryService.DestroyObject({ ObjectID: objectId })
+  }
+
   async fetchArt(
     zoneId: string,
     path: string,
@@ -508,5 +639,20 @@ export class RealSonosDriver implements SonosDriver {
       body: await response.arrayBuffer(),
       contentType: response.headers.get('content-type') ?? 'image/jpeg',
     }
+  }
+}
+
+/** Map a parsed DIDL entry onto our transport-agnostic browse item. */
+function toBrowseItem(track: SonosTrack, host: string): DriverBrowseItem {
+  const upnpClass = track.UpnpClass ?? ''
+  const art = track.AlbumArtUri
+  return {
+    id: track.ItemId ?? track.TrackUri ?? '',
+    title: track.Title ?? 'Unknown',
+    subtitle: track.Artist ?? track.Album ?? null,
+    artUrl: art ? new URL(art, `http://${host}:1400`).toString() : null,
+    isContainer: upnpClass.startsWith('object.container'),
+    uri: track.TrackUri ?? null,
+    metadata: MetaDataHelper.TrackToMetaData(track, true, track.CdUdn),
   }
 }
