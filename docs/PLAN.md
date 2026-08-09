@@ -81,6 +81,37 @@ Per preset: name, icon, colour; zones with per-zone volume; ordered sources; and
 
 A preset may instead be a **single non-shufflable stream** — a radio favourite, TV, or line-in. The editor allows a stream as a solo source and blocks mixing it with track sources; activation just does `SetAVTransportURI` with no queue.
 
+### Conditional rules (M9)
+The same preset should behave differently depending on *when* it's fired: throwbacks on a Thursday, Christmas music in December, a wind-down playlist if it's started late. Rather than forcing near-duplicate presets, a preset gets an **ordered list of rules**, each a condition and an effect.
+
+**Conditions** (all optional; a rule matches when every clause it specifies is satisfied):
+
+| Clause | Example |
+| --- | --- |
+| `daysOfWeek` | `[4]` — Thursdays |
+| `months` | `[12]` — December |
+| `dateRange` | `12-20`…`12-26`, month/day only so it recurs yearly |
+| `timeOfDay` | `21:00`–`05:00`, **wrapping midnight** |
+
+**Effects**, applied in order to a working copy of the preset:
+
+- `addSources` — append to the pool. *"Thursday: also pull in Throwback Hits."*
+- `replaceSources` — discard everything accumulated so far and use these instead. *"After 21:00: just the wind-down playlist."*
+- `adjustVolume` — a delta or absolute per-zone override, clamped to 0–100. Wind-down means quieter, not just different.
+- `setFlags` — override `repeatAll` / `crossfade` / `pauseOthers`.
+
+Decisions worth stating up front, because each is a bug if left implicit:
+
+- **Evaluated once, at activation.** A preset fired at 20:59 does not mutate into the wind-down version at 21:00. The queue is built once; changing it under a listener would be worse than the inconsistency.
+- **All matching rules apply, in order** — not first-match-wins. That makes "December *and* Thursday" compose naturally, and `replaceSources` gives a deliberate escape hatch when someone wants override semantics. Rule order is user-controlled and visible.
+- **Timezone is explicit.** A `DOMOVOI_TZ` setting defaulting to the container's zone, because "after 21:00" silently meaning UTC is exactly the sort of thing that only surfaces in December.
+- **Midnight-wrapping windows are the default case, not an edge case.** `21:00–05:00` must mean the obvious thing.
+- **Evaluation is pure**: `evaluateRules(rules, now) → EffectivePreset`, with the clock injected. No time-dependent test flake, and the UI can ask "what would this do right now?" without touching a speaker.
+- **The resolver cache warms every rule's sources**, not just the base ones — otherwise the first December activation pays for a cold resolve, which for a streaming container means borrowing a speaker at exactly the wrong moment.
+- **The editor shows the resolved outcome** for the current time ("Right now: Sunday Morning + Christmas Classics, Kitchen at 22"), so a rule can be checked without waiting for Thursday.
+
+Storage is a `preset_rules` table (preset_id, position, condition JSON, effect JSON) — purely additive, no migration of existing presets.
+
 ### Activation engine (`server/presets/activate.ts`)
 1. **Idempotence check** — if this preset is already active, no-op and return success (webhook retries and a repeated Siri "on" must be safe). An explicit *Restart* action reshuffles.
 2. Resolve sources from cache → track pool; dedupe if enabled.
@@ -155,6 +186,7 @@ Mirrors `~/Developer/euroscores`: `compose.yml` (Unraid paths under `/mnt/user/a
 - **M6** webhooks, active-state computation, stop/restart, Pause All Music.
 - **M7** embedded HomeKit bridge behind `DOMOVOI_HOMEKIT=1`.
 - **M8** auth, GHCR multi-arch image, deploy script, README.
+- **M9** conditional rules — pure `evaluateRules` + tests, `preset_rules` table, rule editor with a live "right now" preview.
 
 ## Risks
 1. **Service URL expansion** (M3) — the one genuinely unknown piece. Two approaches to try, plus a container-only fallback, and it's proven before anything depends on it.
