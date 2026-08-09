@@ -14,6 +14,8 @@ import { registerPlaybackRoutes } from './routes/playback.js'
 import { registerPresetRoutes } from './routes/presets.js'
 import { registerSourceRoutes } from './routes/sources.js'
 import { registerSystemRoutes } from './routes/system.js'
+import { registerWebhookRoutes } from './routes/webhooks.js'
+import { SettingsStore } from './settings.js'
 import { createDriver } from './sonos/create-driver.js'
 import type { SonosDriver } from './sonos/driver.js'
 import { SourceCache } from './sources/cache.js'
@@ -68,16 +70,21 @@ export async function buildServer({
   })
   await registerSourceRoutes(app, { driver, resolver })
 
-  const db = openDatabase({ dataDir: config.dataDir })
+  const db =
+    config.fakeSonos && config.dataDir === ':memory:'
+      ? openDatabase({ inMemory: true })
+      : openDatabase({ dataDir: config.dataDir })
   const cache = new SourceCache(db, resolver, logger)
   const repo = new PresetRepository(db)
   const engine = new ActivationEngine({ db, driver, store, cache, logger })
+  const settings = new SettingsStore(db)
 
   // Reality can drift while we're not looking (someone pauses in the Sonos app,
   // a speaker reboots), so re-derive active state whenever anything changes.
   store.on('change', () => engine.reconcile())
 
   await registerPresetRoutes(app, { repo, engine, driver, cache })
+  await registerWebhookRoutes(app, { repo, engine, driver, store, settings })
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {

@@ -44,4 +44,9 @@ export const api = {
   joinGroup: (coordinatorZoneId: string, zoneIds: string[]) =>
     request('POST', '/api/groups/join', { coordinatorZoneId, zoneIds }),
   leaveGroup: (zoneIds: string[]) => request('POST', '/api/groups/leave', { zoneIds }),
+  pauseAll: () =>
+    request('POST', '/api/pause-all') as Promise<{
+      pausedGroupIds: string[]
+      skippedGroupIds: string[]
+    }>,
 }

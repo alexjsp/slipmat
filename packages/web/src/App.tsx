@@ -1,6 +1,7 @@
 import { ListMusic, Speaker } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Route, Switch, useLocation } from 'wouter'
+import { PauseAllButton } from '@/components/pause-all-button'
 import { useSystemState } from '@/lib/system-state'
 import { cn } from '@/lib/utils'
 import { NowPlayingPage } from '@/pages/now-playing'
@@ -13,6 +14,16 @@ export function App() {
 
   const onError = useCallback((message: string) => setError(message), [])
 
+  // Nothing to pause means the button is decoration; disable rather than hide,
+  // so it doesn't shift the header around as music starts and stops.
+  const anythingPlaying =
+    state?.groups.some(
+      (group) =>
+        group.transportState === 'PLAYING' &&
+        group.playbackKind !== 'tv' &&
+        group.playbackKind !== 'line-in',
+    ) ?? false
+
   useEffect(() => {
     if (!error) return
     const timer = setTimeout(() => setError(null), 6000)
@@ -21,16 +32,26 @@ export function App() {
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-2xl flex-col">
-      <header className="flex items-baseline justify-between gap-4 px-4 pt-4">
+      <header className="flex items-center justify-between gap-4 px-4 pt-4">
         <h1 className="font-semibold text-xl tracking-tight">Domovoi</h1>
-        <span
-          className={cn(
-            'text-xs',
-            status === 'open' ? 'text-muted-foreground' : 'text-destructive',
-          )}
-        >
-          {status === 'open' ? 'live' : status === 'connecting' ? 'connecting…' : 'reconnecting…'}
-        </span>
+        <div className="flex items-center gap-3">
+          <span
+            className={cn(
+              'text-xs',
+              status === 'open' ? 'text-muted-foreground' : 'text-destructive',
+            )}
+          >
+            {status === 'open' ? 'live' : status === 'connecting' ? 'connecting…' : 'reconnecting…'}
+          </span>
+          <PauseAllButton
+            disabled={!anythingPlaying}
+            onDone={(skipped) =>
+              // Say so, rather than letting it look like the button half-worked.
+              skipped > 0 && setError(`Music paused. Left ${skipped} TV or line-in source playing.`)
+            }
+            onError={onError}
+          />
+        </div>
       </header>
 
       <nav className="flex gap-1 px-4 pt-3">
