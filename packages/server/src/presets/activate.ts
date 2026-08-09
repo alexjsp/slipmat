@@ -53,7 +53,10 @@ export class ActivationEngine {
    * Idempotent by design: a webhook that retries, or Siri sending "on" twice,
    * must not restart the music. `restart` forces a fresh shuffle.
    */
-  async activate(preset: Preset, options: { restart?: boolean } = {}): Promise<ActivationResult> {
+  async activate(
+    preset: Preset,
+    options: { restart?: boolean; seed?: number } = {},
+  ): Promise<ActivationResult> {
     const existing = this.liveActivation(preset.id)
     if (existing && !options.restart) {
       const stillPlaying = this.isStillPlaying(preset.id)
@@ -129,7 +132,7 @@ export class ActivationEngine {
 
     const pool = buildQueue(
       resolved.filter((source) => source.mode === 'tracks').map((source) => source.tracks),
-      { dedupe: preset.dedupe, seed: seedFor(activationId) },
+      { dedupe: preset.dedupe, seed: options.seed ?? seedFor(activationId) },
     )
 
     if (pool.length === 0) {

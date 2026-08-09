@@ -108,13 +108,16 @@ describe('ActivationEngine', () => {
         { kind: 'sonos_playlist', ref: 'SQ:2', label: 'Rock' },
       ],
     })
-    await engine.activate(preset)
+    // Fixed seed: a correct shuffle can legitimately produce the concatenated
+    // order by chance (1 in 20 for 3+3 tracks), so asserting against it with a
+    // random seed is a flaky test, not a stronger one.
+    await engine.activate(preset, { seed: 12345 })
 
     const queue = driver.queueOf(KITCHEN)
     expect(queue).toHaveLength(6)
     const prefixes = queue.map((uri) => uri.split('-')[0])
     expect(new Set(prefixes)).toEqual(new Set(['jazz', 'rock']))
-    // Concatenation would give jazz,jazz,jazz,rock,rock,rock.
+    expect([...queue].sort()).toEqual(['jazz-1', 'jazz-2', 'jazz-3', 'rock-1', 'rock-2', 'rock-3'])
     expect(prefixes).not.toEqual(['jazz', 'jazz', 'jazz', 'rock', 'rock', 'rock'])
   })
 
