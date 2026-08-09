@@ -1,0 +1,27 @@
+# Production / Unraid. Deployed by `just deploy-unraid`.
+#
+# network_mode: host is REQUIRED, not a convenience:
+#   - SSDP discovery is multicast and does not cross a bridge network
+#   - Sonos speakers dial back into our UPnP event callback URL
+#   - HomeKit (when enabled) advertises over mDNS
+services:
+  domovoi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: domovoi:local
+    container_name: domovoi
+    network_mode: host
+    volumes:
+      - /mnt/user/appdata/domovoi:/data
+    environment:
+      DOMOVOI_PORT: ${DOMOVOI_PORT:-5544}
+      DOMOVOI_DATA_DIR: /data
+      DOMOVOI_LOG_LEVEL: ${DOMOVOI_LOG_LEVEL:-info}
+      DOMOVOI_PASSWORD: ${DOMOVOI_PASSWORD:?set DOMOVOI_PASSWORD in .env on the server}
+      DOMOVOI_SESSION_SECRET: ${DOMOVOI_SESSION_SECRET:?set DOMOVOI_SESSION_SECRET in .env on the server}
+      # Fallback if SSDP discovery is blocked; a single speaker IP is enough.
+      DOMOVOI_SEED_IP: ${DOMOVOI_SEED_IP:-}
+      DOMOVOI_HOMEKIT: ${DOMOVOI_HOMEKIT:-0}
+      DOMOVOI_HOMEKIT_PIN: ${DOMOVOI_HOMEKIT_PIN:-031-45-154}
+    restart: unless-stopped

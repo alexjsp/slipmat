@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+DEPLOY_HOST="${DEPLOY_HOST:-root@unraid.jsp.scot}"
+DEPLOY_PATH="${DEPLOY_PATH:-/mnt/user/appdata/domovoi_source}"
+COMPOSE_FILE="${COMPOSE_FILE:-compose.yml}"
+DEPLOY_PROJECT_NAME="${DEPLOY_PROJECT_NAME:-domovoi}"
+RSYNC_RSH="${RSYNC_RSH:-ssh}"
+RSYNC_FLAGS="${RSYNC_FLAGS:--az}"
+
+SYNC_PATHS=(
+  "./${COMPOSE_FILE}"
+  "./Dockerfile"
+  "./package.json"
+  "./pnpm-workspace.yaml"
+  "./pnpm-lock.yaml"
+  "./tsconfig.base.json"
+  "./biome.json"
+  "./packages/"
+)
+
+echo "Deploying Domovoi to ${DEPLOY_HOST}:${DEPLOY_PATH}"
+echo "Using Compose project ${DEPLOY_PROJECT_NAME}"
+
+ssh "${DEPLOY_HOST}" "mkdir -p '${DEPLOY_PATH}'"
+
+(
+  cd "${ROOT_DIR}"
+  # --delete keeps the remote tree honest; node_modules and dist are rebuilt
+  # inside the image, so there is no point shipping them.
+  rsync ${RSYNC_FLAGS} --delete --relative -e "${RSYNC_RSH}" \
+    --exclude 'node_modules' \
+    --exclude 'dist' \
+    --exclude 'data' \
+    "${SYNC_PATHS[@]}" \
+    "${DEPLOY_HOST}:${DEPLOY_PATH}/"
+)
+
+REMOTE_CMD="$(cat <<EOF
+set -euo pipefail
+cd '${DEPLOY_PATH}'
+if [ ! -f .env ]; then
+  echo "Missing ${DEPLOY_PATH}/.env on the server (needs DOMOVOI_PASSWORD and DOMOVOI_SESSION_SECRET)" >&2
+  exit 1
+fi
+docker compose -p '${DEPLOY_PROJECT_NAME}' -f '${COMPOSE_FILE}' build
+docker compose -p '${DEPLOY_PROJECT_NAME}' -f '${COMPOSE_FILE}' up -d
+docker compose -p '${DEPLOY_PROJECT_NAME}' -f '${COMPOSE_FILE}' ps
+EOF
+)"
+
+ssh "${DEPLOY_HOST}" "${REMOTE_CMD}"
+
+echo "Done."

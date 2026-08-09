@@ -1,0 +1,8 @@
+packages:
+  - packages/*
+
+# Native modules and bundlers that legitimately need their install scripts.
+onlyBuiltDependencies:
+  - argon2
+  - better-sqlite3
+  - esbuild

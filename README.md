@@ -1,0 +1,96 @@
+# Domovoi
+
+Self-hosted web app for controlling and automating a Sonos system on the local network.
+
+The point of Domovoi is **presets**: named automations that group a set of speakers, set their
+volumes, and start playback of a track pool shuffled together from several playlists, albums and
+favourites. Presets can be fired from the UI, from a webhook, or from a HomeKit switch that also
+reports whether the preset is currently playing.
+
+It talks to Sonos entirely over the local network — no cloud, no Sonos account.
+
+> **Status:** early. See [`docs/PLAN.md`](docs/PLAN.md) for the full design and milestones.
+
+## Features
+
+- Web UI for everyday playback: play/pause/skip/seek, per-zone volume, group and ungroup.
+- Presets that group speakers, set per-zone volumes, and play a shuffled cross-source track pool.
+- Sources: Sonos playlists, Sonos favourites, the local music library, and streaming content you
+  paste a share URL for.
+- Triggers: UI buttons, webhooks (GET or POST, so Shortcuts and Stream Deck work), and an optional
+  embedded HomeKit bridge.
+- **Pause All Music** — silences the house without touching TV audio.
+
+## Running it
+
+```sh
+docker run -d --name domovoi \
+  --network host \
+  -v /path/to/appdata/domovoi:/data \
+  -e DOMOVOI_PASSWORD=changeme \
+  -e DOMOVOI_SESSION_SECRET=$(openssl rand -hex 32) \
+  ghcr.io/alexjsp/domovoi:latest
+```
+
+Then open `http://<host>:5544`.
+
+### `--network host` is required
+
+Not a convenience — three things depend on it:
+
+- **SSDP discovery** is multicast and doesn't cross a Docker bridge network.
+- **UPnP events**: the speakers dial *back into* Domovoi's callback URL, so they need a routable
+  address for it.
+- **HomeKit** (if enabled) advertises over mDNS.
+
+If discovery still can't get through, set `DOMOVOI_SEED_IP` to any one speaker's IP address —
+Domovoi finds the rest of the household from there.
+
+Docker Desktop on macOS has no real host networking. Develop natively with `just dev` instead.
+
+### Configuration
+
+See [`.env.example`](.env.example) for the full list. The ones that matter:
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `DOMOVOI_PASSWORD` | — | Shared password for the UI. Unset disables auth (dev only). |
+| `DOMOVOI_SESSION_SECRET` | — | Random string; rotating it logs everyone out. |
+| `DOMOVOI_PORT` | `5544` | |
+| `DOMOVOI_SEED_IP` | — | Discovery fallback. |
+| `DOMOVOI_HOMEKIT` | `0` | Set to `1` to enable the embedded HomeKit bridge. |
+
+Webhook URLs are not session-protected — they carry a per-preset secret token instead, so they
+work from Shortcuts, Node-RED and the like. Regenerate a token from the preset editor if one leaks.
+
+## Development
+
+Requires Node 22+, [pnpm](https://pnpm.io) and [just](https://github.com/casey/just).
+
+```sh
+just install
+just dev        # API on :5544, UI on :5545 with a proxy to the API
+just check      # lint, typecheck, test
+```
+
+> ⚠️ **Tests never touch real speakers.** They run against the fake Sonos layer. Anything that
+> would mutate real hardware needs an explicit ask first — see [`CLAUDE.md`](CLAUDE.md).
+
+### Deploying to Unraid
+
+Create `/mnt/user/appdata/domovoi_source/.env` on the server with `DOMOVOI_PASSWORD` and
+`DOMOVOI_SESSION_SECRET`, then:
+
+```sh
+just deploy-unraid
+```
+
+This rsyncs the source tree to the server, builds the image there and brings the stack up. Override
+`DEPLOY_HOST` / `DEPLOY_PATH` if your box isn't at the default.
+
+## Prior art
+
+[`jishi/node-sonos-http-api`](https://github.com/jishi/node-sonos-http-api) pioneered this shape and
+its preset semantics were a useful reference. Domovoi is built on
+[`@svrooij/sonos`](https://github.com/svrooij/node-sonos-ts) instead — actively maintained, fully
+typed, with the event subscriptions the preset state tracking needs.
