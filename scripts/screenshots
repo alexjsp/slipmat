@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#
+# Capture the whole UI against the fake household — never real speakers.
+#
+# Boots a server on a demo database seeded with realistic presets and rules,
+# drives it with Playwright (interactive surfaces like the editor and source
+# picker only exist behind a click), then tears everything down.
+#
+#   ./scripts/screenshots [outDir]
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OUT_DIR="${1:-${ROOT_DIR}/screenshots}"
+PORT="${SCREENSHOT_PORT:-5599}"
+DATA_DIR="$(mktemp -d)"
+
+cd "${ROOT_DIR}"
+
+echo "Building…"
+pnpm --filter @domovoi/shared build >/dev/null
+pnpm --filter @domovoi/server build >/dev/null
+pnpm --filter @domovoi/web build >/dev/null
+rm -rf packages/server/public
+cp -r packages/web/dist packages/server/public
+
+DOMOVOI_FAKE_SONOS=1 DOMOVOI_PORT="${PORT}" DOMOVOI_LOG_LEVEL=error \
+  DOMOVOI_DATA_DIR="${DATA_DIR}" DOMOVOI_HOMEKIT=1 DOMOVOI_HOMEKIT_NAME="Domovoi Demo" \
+  node packages/server/dist/index.js >/dev/null 2>&1 &
+SERVER_PID=$!
+cleanup() {
+  kill "${SERVER_PID}" 2>/dev/null || true
+  rm -rf "${DATA_DIR}"
+  rm -rf "${ROOT_DIR}/packages/server/public"
+}
+trap cleanup EXIT
+
+for _ in $(seq 1 40); do
+  if curl -sf "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then break; fi
+  sleep 0.3
+done
+
+echo "Seeding demo presets…"
+api() { curl -sf -X "$1" "http://127.0.0.1:${PORT}$2" -H 'content-type: application/json' -d "$3"; }
+
+PRESET_A=$(api POST /api/presets '{
+  "name":"Morning Kitchen","homekitEnabled":true,
+  "zones":[{"zoneId":"RINCON_KITCHEN01400","volume":28,"isCoordinator":true},
+           {"zoneId":"RINCON_BEDROOM01400","volume":12}],
+  "sources":[{"kind":"raw_uri","ref":"x-sonos-http:song:1.mp4","label":"Sunday Morning"},
+             {"kind":"raw_uri","ref":"x-sonos-http:song:2.mp4","label":"Chill Out"}]}' \
+  | python3 -c "import json,sys;print(json.load(sys.stdin)['preset']['id'])")
+
+api POST /api/presets '{
+  "name":"Dinner Party","homekitEnabled":true,"pauseOthers":true,
+  "zones":[{"zoneId":"RINCON_LIVING01400","volume":35,"isCoordinator":true},
+           {"zoneId":"RINCON_OFFICE01400","volume":22}],
+  "sources":[{"kind":"raw_uri","ref":"x-sonos-http:song:3.mp4","label":"Dinner Party"}]}' >/dev/null
+
+api POST /api/presets '{
+  "name":"Radio 6 Everywhere",
+  "zones":[{"zoneId":"RINCON_OFFICE01400","volume":18,"isCoordinator":true}],
+  "sources":[{"kind":"raw_uri","ref":"x-sonosapi-stream:bbc6?sid=254","label":"BBC 6 Music"}]}' >/dev/null
+
+api PUT "/api/presets/${PRESET_A}/rules" '{"rules":[
+  {"label":"Throwback Thursday","enabled":true,"condition":{"daysOfWeek":[4]},
+   "effect":{"addSources":[{"kind":"raw_uri","ref":"x-sonos-http:song:9.mp4","label":"Throwback Hits"}]}},
+  {"label":"Christmas","enabled":true,"condition":{"months":[12]},
+   "effect":{"addSources":[{"kind":"raw_uri","ref":"x-sonos-http:song:8.mp4","label":"Christmas Classics"}]}},
+  {"label":"Wind down","enabled":true,"condition":{"timeOfDay":{"from":"21:00","to":"05:00"}},
+   "effect":{"replaceSources":[{"kind":"raw_uri","ref":"x-sonos-http:song:7.mp4","label":"Wind Down"}],
+             "volumeDelta":-15}}]}' >/dev/null
+
+api POST "/api/presets/${PRESET_A}/activate" '{}' >/dev/null
+
+echo "Capturing…"
+pnpm --filter @domovoi/web exec tsx scripts/screenshots.ts "${OUT_DIR}" "http://127.0.0.1:${PORT}"
+echo "Wrote ${OUT_DIR}"

@@ -12,3 +12,4 @@ coverage/
 .vite/
 packages/server/public/
 screenshot.png
+screenshots/

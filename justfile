@@ -43,6 +43,10 @@ check: lint typecheck test
 screenshot route="/" output="screenshot.png" width="430" height="900":
   ./scripts/screenshot {{route}} {{output}} {{width}} {{height}}
 
+# Capture the whole UI (interactive surfaces included) via Playwright.
+screenshots output="screenshots":
+  ./scripts/screenshots {{output}}
+
 docker-build:
   docker compose -f compose.local.yml build
 
