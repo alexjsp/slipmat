@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+#
+# Screenshot the UI against the fake household — never real speakers.
+#
+# Uses the headless Chromium that Playwright caches, so there's no browser
+# dependency in this repo. Usage:
+#
+#   ./scripts/screenshot                        # / at phone width
+#   ./scripts/screenshot /presets out.png 1280 900
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+ROUTE="${1:-/}"
+OUTPUT="${2:-${ROOT_DIR}/screenshot.png}"
+WIDTH="${3:-430}"
+HEIGHT="${4:-900}"
+PORT="${SCREENSHOT_PORT:-5599}"
+
+CHROME="$(ls -d "${HOME}"/Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell 2>/dev/null | sort -V | tail -1 || true)"
+if [ -z "${CHROME}" ]; then
+  echo "No cached Playwright Chromium found. Install one with:" >&2
+  echo "  pnpm dlx playwright install chromium --only-shell" >&2
+  exit 1
+fi
+
+cd "${ROOT_DIR}"
+
+echo "Building…"
+pnpm --filter @domovoi/shared build >/dev/null
+pnpm --filter @domovoi/server build >/dev/null
+pnpm --filter @domovoi/web build >/dev/null
+rm -rf packages/server/public
+cp -r packages/web/dist packages/server/public
+
+DOMOVOI_FAKE_SONOS=1 DOMOVOI_PORT="${PORT}" DOMOVOI_LOG_LEVEL=warn \
+  node packages/server/dist/index.js >/dev/null 2>&1 &
+SERVER_PID=$!
+trap 'kill "${SERVER_PID}" 2>/dev/null || true' EXIT
+
+for _ in $(seq 1 30); do
+  if curl -sf "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then break; fi
+  sleep 0.3
+done
+
+echo "Capturing ${ROUTE} at ${WIDTH}x${HEIGHT}…"
+"${CHROME}" --headless --disable-gpu \
+  --window-size="${WIDTH},${HEIGHT}" \
+  --screenshot="${OUTPUT}" \
+  --virtual-time-budget=6000 \
+  "http://127.0.0.1:${PORT}${ROUTE}" >/dev/null 2>&1
+
+echo "Wrote ${OUTPUT}"

@@ -7,6 +7,7 @@ import type {
   DriverZone,
   SonosDriver,
 } from './driver.js'
+import { UnknownZoneError } from './errors.js'
 
 /**
  * An in-memory Sonos household.
@@ -116,14 +117,14 @@ export class FakeSonosDriver implements SonosDriver {
 
   private requireZone(zoneId: string): FakeZone {
     const zone = this.zones.get(zoneId)
-    if (!zone) throw new Error(`Unknown zone ${zoneId}`)
+    if (!zone) throw new UnknownZoneError(zoneId)
     if (zone.unreachable) throw new Error(`Zone ${zone.name} is unreachable`)
     return zone
   }
 
   private groupFor(zoneId: string): FakeGroup {
     const group = this.groups.find((g) => g.memberZoneIds.includes(zoneId))
-    if (!group) throw new Error(`Zone ${zoneId} is not in any group`)
+    if (!group) throw new UnknownZoneError(zoneId)
     return group
   }
 
@@ -295,6 +296,20 @@ export class FakeSonosDriver implements SonosDriver {
     const group = this.groupFor(zoneId)
     group.transportUri = transportUri
     group.currentTrackUri = trackUri
+    group.transportState = 'PLAYING'
+    this.changed()
+  }
+
+  /** As above, but with full track metadata — used to seed the dev household. */
+  setNowPlaying(
+    zoneId: string,
+    options: { transportUri: string; track: DriverTrack; positionSeconds?: number },
+  ) {
+    const group = this.groupFor(zoneId)
+    group.transportUri = options.transportUri
+    group.currentTrackUri = options.track.uri
+    group.currentTrack = options.track
+    group.positionSeconds = options.positionSeconds ?? 0
     group.transportState = 'PLAYING'
     this.changed()
   }

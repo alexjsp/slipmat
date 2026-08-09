@@ -11,3 +11,4 @@ data/
 coverage/
 .vite/
 packages/server/public/
+screenshot.png

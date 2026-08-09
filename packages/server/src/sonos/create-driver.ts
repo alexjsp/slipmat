@@ -7,7 +7,25 @@ import { RealSonosDriver } from './real-driver.js'
 export function createDriver(config: Config, logger: Logger): SonosDriver {
   if (config.fakeSonos) {
     logger.warn('DOMOVOI_FAKE_SONOS is set — using the in-memory household, no real speakers')
-    return new FakeSonosDriver()
+    // Seed a scenario worth looking at: a soundbar on TV audio (which pause-all
+    // must skip) and a grouped pair playing from a queue.
+    const fake = new FakeSonosDriver({ tvZoneIds: ['RINCON_LIVING01400'] })
+    void fake.start().then(async () => {
+      await fake.joinGroup('RINCON_KITCHEN01400', ['RINCON_BEDROOM01400'])
+      fake.setNowPlaying('RINCON_KITCHEN01400', {
+        transportUri: 'x-rincon-queue:RINCON_KITCHEN01400#0',
+        track: {
+          uri: 'x-sonos-spotify:spotify%3atrack%3ademo',
+          title: 'Windowlicker',
+          artist: 'Aphex Twin',
+          album: 'Windowlicker',
+          artUrl: null,
+          durationSeconds: 366,
+        },
+        positionSeconds: 94,
+      })
+    })
+    return fake
   }
   return new RealSonosDriver({ logger, seedIp: config.seedIp })
 }

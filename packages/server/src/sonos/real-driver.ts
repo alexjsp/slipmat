@@ -13,6 +13,7 @@ import type {
   DriverZone,
   SonosDriver,
 } from './driver.js'
+import { UnknownZoneError } from './errors.js'
 import { formatDuration, parseDuration } from './time.js'
 import { classifyPlaybackKind, followUriFor } from './uris.js'
 
@@ -318,7 +319,7 @@ export class RealSonosDriver implements SonosDriver {
 
   private requireDevice(zoneId: string): SonosDevice {
     const device = this.deviceByUuid(zoneId)
-    if (!device) throw new Error(`Unknown zone ${zoneId}`)
+    if (!device) throw new UnknownZoneError(zoneId)
     return device
   }
 

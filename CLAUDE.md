@@ -24,6 +24,15 @@ ungrouping, modifying queues, saving or deleting Sonos playlists, and setting pl
 - `packages/server` — Fastify API, Sonos layer, SQLite (Drizzle), optional HomeKit bridge.
 - `packages/web` — Vite + React + Tailwind v4 + shadcn/ui.
 
+## Seeing the UI
+
+`just screenshot [route] [output] [width] [height]` builds everything, boots the server against
+the **fake household**, and captures the page with the headless Chromium that Playwright caches
+(no browser dependency in this repo). Nothing real is touched.
+
+`DOMOVOI_FAKE_SONOS=1` also works for interactive development — it seeds a grouped pair playing a
+queue, a soundbar on TV audio, and an idle room, which is enough to exercise most UI states.
+
 ## Conventions
 
 - Biome for lint and format (`just lint`, `just format`). Single quotes, no semicolons, 100 cols.

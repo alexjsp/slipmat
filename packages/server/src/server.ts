@@ -4,8 +4,10 @@ import { fileURLToPath } from 'node:url'
 import fastifyStatic from '@fastify/static'
 import fastifyWebsocket from '@fastify/websocket'
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify'
+import { ZodError } from 'zod'
 import type { Config } from './config.js'
 import type { Logger } from './logger.js'
+import { registerPlaybackRoutes } from './routes/playback.js'
 import { registerSystemRoutes } from './routes/system.js'
 import { createDriver } from './sonos/create-driver.js'
 import type { SonosDriver } from './sonos/driver.js'
@@ -49,6 +51,17 @@ export async function buildServer({
   }))
 
   await registerSystemRoutes(app, { store })
+  await registerPlaybackRoutes(app, { driver, store })
+
+  app.setErrorHandler((error, request, reply) => {
+    if (error instanceof ZodError) {
+      return reply
+        .status(400)
+        .send({ error: 'bad_request', message: 'Invalid request', details: error.issues })
+    }
+    request.log.error({ err: error }, 'unhandled error')
+    return reply.status(500).send({ error: 'internal_error', message: 'Something went wrong' })
+  })
 
   // The built SPA is copied next to the server bundle in the Docker image. In
   // dev it doesn't exist and Vite serves the UI on its own port instead.

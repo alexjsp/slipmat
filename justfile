@@ -39,6 +39,10 @@ format:
 
 check: lint typecheck test
 
+# Screenshot the UI against the fake household (no real speakers touched).
+screenshot route="/" output="screenshot.png" width="430" height="900":
+  ./scripts/screenshot {{route}} {{output}} {{width}} {{height}}
+
 docker-build:
   docker compose -f compose.local.yml build
 
