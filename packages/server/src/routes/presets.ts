@@ -1,0 +1,152 @@
+import type { Preset, PresetStatus } from '@domovoi/shared'
+import { presetInputSchema } from '@domovoi/shared'
+import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
+import type { ActivationEngine } from '../presets/activate.js'
+import type { PresetRepository } from '../presets/repository.js'
+import type { SonosDriver } from '../sonos/driver.js'
+import type { SourceCache } from '../sources/cache.js'
+
+export type PresetRoutesDeps = {
+  repo: PresetRepository
+  engine: ActivationEngine
+  driver: SonosDriver
+  cache: SourceCache
+}
+
+const idParamsSchema = z.object({ id: z.string().min(1) })
+
+export async function registerPresetRoutes(
+  app: FastifyInstance,
+  { repo, engine, driver, cache }: PresetRoutesDeps,
+) {
+  const zoneNames = () =>
+    new Map(driver.snapshot().zones.map((zone) => [zone.id, zone.name] as const))
+
+  /** Attach what the resolver cache already knows, without resolving anything. */
+  const withSourceMeta = (preset: Preset): Preset => ({
+    ...preset,
+    sources: preset.sources.map((source) => {
+      const cached = cache.peek({ kind: source.kind, ref: source.ref })
+      return {
+        ...source,
+        resolutionMode: cached?.mode ?? null,
+        trackCount: cached ? cached.tracks.length : null,
+        resolvedAt: cached?.resolvedAt ?? null,
+        resolveError: cached?.warning ?? null,
+      }
+    }),
+  })
+
+  const statusOf = (preset: Preset): PresetStatus => {
+    const activation = engine.liveActivation(preset.id)
+    const active = engine.isStillPlaying(preset.id)
+    const uris = activation ? (JSON.parse(activation.trackUrisJson) as string[]) : []
+    return {
+      presetId: preset.id,
+      active,
+      activationId: activation?.id ?? null,
+      startedAt: activation?.startedAt ?? null,
+      loading: false,
+      tracksEnqueued: uris.length,
+      tracksTotal: null,
+      warnings: activation ? (JSON.parse(activation.warningsJson) as string[]) : [],
+    }
+  }
+
+  app.get('/api/presets', async () => ({
+    presets: repo.list().map(withSourceMeta),
+    statuses: repo.list().map(statusOf),
+  }))
+
+  app.get('/api/presets/:id', async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params)
+    const preset = repo.get(id)
+    if (!preset) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
+    return { preset: withSourceMeta(preset), status: statusOf(preset) }
+  })
+
+  app.post('/api/presets', async (request, reply) => {
+    const input = presetInputSchema.parse(request.body)
+    const preset = repo.create(input, zoneNames())
+    // Warm the cache in the background so the first activation is instant.
+    void warmSources(cache, preset)
+    return reply.status(201).send({ preset: withSourceMeta(preset) })
+  })
+
+  app.patch('/api/presets/:id', async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params)
+    const input = presetInputSchema.parse(request.body)
+    const preset = repo.update(id, input, zoneNames())
+    if (!preset) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
+    void warmSources(cache, preset)
+    return { preset: withSourceMeta(preset) }
+  })
+
+  app.delete('/api/presets/:id', async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params)
+    if (!repo.delete(id)) {
+      return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
+    }
+    return reply.status(204).send()
+  })
+
+  app.post('/api/presets/:id/activate', async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params)
+    const preset = repo.get(id)
+    if (!preset) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
+    try {
+      return await engine.activate(preset)
+    } catch (err) {
+      request.log.warn({ err, presetId: id }, 'activation failed')
+      return reply.status(502).send({
+        error: 'activation_failed',
+        message: err instanceof Error ? err.message : 'Could not start this preset',
+      })
+    }
+  })
+
+  app.post('/api/presets/:id/restart', async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params)
+    const preset = repo.get(id)
+    if (!preset) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
+    return engine.activate(preset, { restart: true })
+  })
+
+  app.post('/api/presets/:id/stop', async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params)
+    if (!repo.get(id)) {
+      return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
+    }
+    const stopped = await engine.stop(id)
+    return { stopped }
+  })
+
+  app.post('/api/presets/:id/regenerate-token', async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params)
+    const token = repo.regenerateWebhookToken(id)
+    if (!token) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
+    return { webhookToken: token }
+  })
+
+  /** Force a re-resolve, e.g. after adding tracks to a playlist. */
+  app.post('/api/presets/:id/refresh-sources', async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params)
+    const preset = repo.get(id)
+    if (!preset) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
+    for (const source of preset.sources) {
+      await cache.refresh({ kind: source.kind, ref: source.ref, label: source.label })
+    }
+    return { preset: withSourceMeta(repo.get(id)!) }
+  })
+
+  app.get('/api/presets/export', async () => ({ presets: repo.list() }))
+}
+
+function warmSources(cache: SourceCache, preset: Preset) {
+  return Promise.allSettled(
+    preset.sources.map((source) =>
+      cache.get({ kind: source.kind, ref: source.ref, label: source.label }),
+    ),
+  )
+}

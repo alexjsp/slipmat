@@ -6,12 +6,17 @@ import fastifyWebsocket from '@fastify/websocket'
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify'
 import { ZodError } from 'zod'
 import type { Config } from './config.js'
+import { openDatabase } from './db/index.js'
 import type { Logger } from './logger.js'
+import { ActivationEngine } from './presets/activate.js'
+import { PresetRepository } from './presets/repository.js'
 import { registerPlaybackRoutes } from './routes/playback.js'
+import { registerPresetRoutes } from './routes/presets.js'
 import { registerSourceRoutes } from './routes/sources.js'
 import { registerSystemRoutes } from './routes/system.js'
 import { createDriver } from './sonos/create-driver.js'
 import type { SonosDriver } from './sonos/driver.js'
+import { SourceCache } from './sources/cache.js'
 import { SourceResolver } from './sources/resolver.js'
 import { SystemStateStore } from './state/store.js'
 
@@ -62,6 +67,17 @@ export async function buildServer({
     allowScratchQueueExpansion: config.allowQueueExpansion,
   })
   await registerSourceRoutes(app, { driver, resolver })
+
+  const db = openDatabase({ dataDir: config.dataDir })
+  const cache = new SourceCache(db, resolver, logger)
+  const repo = new PresetRepository(db)
+  const engine = new ActivationEngine({ db, driver, store, cache, logger })
+
+  // Reality can drift while we're not looking (someone pauses in the Sonos app,
+  // a speaker reboots), so re-derive active state whenever anything changes.
+  store.on('change', () => engine.reconcile())
+
+  await registerPresetRoutes(app, { repo, engine, driver, cache })
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
