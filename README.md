@@ -27,8 +27,6 @@ It talks to Sonos entirely over the local network — no cloud, no Sonos account
 docker run -d --name domovoi \
   --network host \
   -v /path/to/appdata/domovoi:/data \
-  -e DOMOVOI_PASSWORD=changeme \
-  -e DOMOVOI_SESSION_SECRET=$(openssl rand -hex 32) \
   ghcr.io/alexjsp/domovoi:latest
 ```
 
@@ -54,14 +52,27 @@ See [`.env.example`](.env.example) for the full list. The ones that matter:
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `DOMOVOI_PASSWORD` | — | Shared password for the UI. Unset disables auth (dev only). |
-| `DOMOVOI_SESSION_SECRET` | — | Random string; rotating it logs everyone out. |
+| `DOMOVOI_PASSWORD` | — | **Optional.** Setting it turns authentication on; unset means no login. |
+| `DOMOVOI_SESSION_SECRET` | — | Only needed when a password is set. Rotating it logs everyone out. |
 | `DOMOVOI_PORT` | `5544` | |
 | `DOMOVOI_SEED_IP` | — | Discovery fallback. |
 | `DOMOVOI_HOMEKIT` | `0` | Set to `1` to enable the embedded HomeKit bridge. |
 
-Webhook URLs are not session-protected — they carry a per-preset secret token instead, so they
-work from Shortcuts, Node-RED and the like. Regenerate a token from the preset editor if one leaks.
+### Authentication is optional
+
+Domovoi runs without a login by default, and that's deliberate rather than an oversight: Sonos has
+no authentication of its own, so anything already on your network can control the speakers. Putting
+a password in front of Domovoi wouldn't change that.
+
+Set `DOMOVOI_PASSWORD` to turn it on. Worth doing if you expose Domovoi beyond the LAN, or if not
+everyone in the house should be able to edit presets.
+
+Two protections apply either way:
+
+- **Webhook URLs always carry a per-preset secret token** rather than relying on a session, so they
+  work from Shortcuts, Node-RED and the like. Regenerate a token from the preset editor if one leaks.
+- **A host-header allowlist** blocks DNS rebinding, which is the one thing a browser on your network
+  can do to an open LAN service.
 
 ## Development
 
@@ -78,8 +89,8 @@ just check      # lint, typecheck, test
 
 ### Deploying to Unraid
 
-Create `/mnt/user/appdata/domovoi_source/.env` on the server with `DOMOVOI_PASSWORD` and
-`DOMOVOI_SESSION_SECRET`, then:
+Optionally create `/mnt/user/appdata/domovoi_source/.env` on the server for settings like
+`DOMOVOI_PASSWORD` — it isn't required. Then:
 
 ```sh
 just deploy-unraid

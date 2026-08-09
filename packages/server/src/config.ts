@@ -11,7 +11,11 @@ const envSchema = z.object({
   DOMOVOI_DATA_DIR: z.string().default('./data'),
   DOMOVOI_LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
 
-  /** Shared password for the UI. Unset disables auth entirely (dev only). */
+  /**
+   * Setting this turns authentication on. Unset means no login at all, which is
+   * the default on purpose: Sonos has no auth of its own, so anything on the
+   * LAN can already drive the speakers.
+   */
   DOMOVOI_PASSWORD: z.string().optional(),
   DOMOVOI_SESSION_SECRET: z.string().optional(),
   /** Extra Host header values to accept, beyond localhost and private ranges. */

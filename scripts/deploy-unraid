@@ -42,10 +42,9 @@ ssh "${DEPLOY_HOST}" "mkdir -p '${DEPLOY_PATH}'"
 REMOTE_CMD="$(cat <<EOF
 set -euo pipefail
 cd '${DEPLOY_PATH}'
-if [ ! -f .env ]; then
-  echo "Missing ${DEPLOY_PATH}/.env on the server (needs DOMOVOI_PASSWORD and DOMOVOI_SESSION_SECRET)" >&2
-  exit 1
-fi
+# .env is optional — it only carries settings like DOMOVOI_PASSWORD, and auth
+# is off by default.
+touch .env
 docker compose -p '${DEPLOY_PROJECT_NAME}' -f '${COMPOSE_FILE}' build
 docker compose -p '${DEPLOY_PROJECT_NAME}' -f '${COMPOSE_FILE}' up -d
 docker compose -p '${DEPLOY_PROJECT_NAME}' -f '${COMPOSE_FILE}' ps

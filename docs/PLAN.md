@@ -118,8 +118,17 @@ When enabled: one `Switch` per preset with `homekit: true` (on → activate, off
 - `GET|POST /api/webhooks/:token` — per-preset tokens plus a reserved pause-all token; regenerable; GET supported so Shortcuts / Stream Deck / Node-RED can fire them. Not session-gated. Responds immediately; activation runs async.
 - `GET /api/art?…` — proxies speaker `:1400/getaa` artwork so it works off-LAN behind Tailscale or a reverse proxy.
 
-### Auth
-Single shared password (`DOMOVOI_PASSWORD`), argon2-hashed at boot, httpOnly signed session cookie, Fastify preHandler on everything except login and `/api/webhooks/*`. Host-header allowlist to blunt DNS rebinding.
+### Auth — optional, off by default
+**Setting `DOMOVOI_PASSWORD` is what turns authentication on.** Leave it unset and Domovoi is wide open on the LAN, which is the right default: Sonos itself has no authentication, so anything on the network can already drive the speakers. Requiring a login to reach a control surface that Sonos leaves open would be friction without a matching security gain.
+
+When the variable *is* set: the password is argon2-hashed at boot, the UI gets an httpOnly signed session cookie, and a Fastify preHandler guards everything except login and `/api/webhooks/*`. Worth turning on if Domovoi is reachable beyond the LAN, or if the household shouldn't all have preset-editing rights.
+
+Independent of that setting:
+
+- **Webhook tokens are always required.** They're the secret in the URL, not a session, so they work from Shortcuts and Node-RED either way — and an unauthenticated Domovoi still doesn't hand out working webhook URLs to anyone who asks.
+- **The host-header allowlist always applies.** It blunts DNS rebinding, which is the one attack an open LAN service is genuinely exposed to from a browser, and it costs the user nothing.
+
+Startup logs once, at `warn`, when auth is off — a reminder, not a nag.
 
 ### Data model (Drizzle, SQLite at `/data/domovoi.db`)
 `presets` · `preset_zones` (preset_id, zone_id, volume, is_coordinator) · `preset_sources` (preset_id, position, kind, ref, label) · `resolved_tracks` cache (source hash, uris JSON, resolved_at) · `activations` · `settings`. A **`triggers` table exists from day one** so cron schedules drop in later without migration — no scheduler in v1.
