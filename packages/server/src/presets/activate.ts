@@ -212,7 +212,7 @@ export class ActivationEngine {
     const group = snapshot.groups.find(
       (candidate) => candidate.coordinatorZoneId === activation.coordinatorZoneId,
     )
-    if (!group || group.transportState !== 'PLAYING') return false
+    if (group?.transportState !== 'PLAYING') return false
 
     const members = new Set(group.memberZoneIds)
     const expected = JSON.parse(activation.memberZoneIdsJson) as string[]

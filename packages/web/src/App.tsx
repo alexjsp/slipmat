@@ -1,23 +1,27 @@
+import { ListMusic, Speaker } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { GroupCard } from '@/components/group-card'
+import { Link, Route, Switch, useLocation } from 'wouter'
 import { useSystemState } from '@/lib/system-state'
 import { cn } from '@/lib/utils'
+import { NowPlayingPage } from '@/pages/now-playing'
+import { PresetsPage } from '@/pages/presets'
 
 export function App() {
   const { state, status } = useSystemState()
   const [error, setError] = useState<string | null>(null)
+  const [location] = useLocation()
 
   const onError = useCallback((message: string) => setError(message), [])
 
   useEffect(() => {
     if (!error) return
-    const timer = setTimeout(() => setError(null), 5000)
+    const timer = setTimeout(() => setError(null), 6000)
     return () => clearTimeout(timer)
   }, [error])
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-4 p-4 pb-16">
-      <header className="flex items-baseline justify-between gap-4">
+    <div className="mx-auto flex min-h-dvh max-w-2xl flex-col">
+      <header className="flex items-baseline justify-between gap-4 px-4 pt-4">
         <h1 className="font-semibold text-xl tracking-tight">Domovoi</h1>
         <span
           className={cn(
@@ -29,25 +33,67 @@ export function App() {
         </span>
       </header>
 
+      <nav className="flex gap-1 px-4 pt-3">
+        <NavLink href="/" current={location} icon={<Speaker className="size-4" />}>
+          Now Playing
+        </NavLink>
+        <NavLink href="/presets" current={location} icon={<ListMusic className="size-4" />}>
+          Presets
+        </NavLink>
+      </nav>
+
       {error && (
-        <output className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive text-sm">
+        <output className="mx-4 mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive text-sm">
           {error}
         </output>
       )}
 
-      {!state ? (
-        <p className="text-muted-foreground text-sm">Loading…</p>
-      ) : !state.ready ? (
-        <p className="text-muted-foreground text-sm">
-          No Sonos devices found yet. Check host networking, or set <code>DOMOVOI_SEED_IP</code>.
-        </p>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {state.groups.map((group) => (
-            <GroupCard key={group.id} group={group} zones={state.zones} onError={onError} />
-          ))}
-        </div>
+      <main className="flex-1 p-4 pb-16">
+        {!state ? (
+          <p className="text-muted-foreground text-sm">Loading…</p>
+        ) : !state.ready ? (
+          <p className="text-muted-foreground text-sm">
+            No Sonos devices found yet. Check host networking, or set <code>DOMOVOI_SEED_IP</code>.
+          </p>
+        ) : (
+          <Switch>
+            <Route path="/presets">
+              <PresetsPage zones={state.zones} onError={onError} />
+            </Route>
+            <Route>
+              <NowPlayingPage state={state} onError={onError} />
+            </Route>
+          </Switch>
+        )}
+      </main>
+    </div>
+  )
+}
+
+function NavLink({
+  href,
+  current,
+  icon,
+  children,
+}: {
+  href: string
+  current: string
+  icon: React.ReactNode
+  children: React.ReactNode
+}) {
+  const active = href === '/' ? current === '/' : current.startsWith(href)
+  return (
+    <Link
+      href={href}
+      className={cn(
+        'flex items-center gap-1.5 rounded-md px-3 py-1.5 font-medium text-sm transition-colors',
+        active
+          ? 'bg-secondary text-secondary-foreground'
+          : 'text-muted-foreground hover:text-foreground',
       )}
-    </main>
+    >
+      {icon}
+      {children}
+    </Link>
   )
 }

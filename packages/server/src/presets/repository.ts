@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { Preset, PresetInput, PresetSource, PresetZone } from '@domovoi/shared'
-import { and, asc, eq } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import type { Db, DbTx } from '../db/index.js'
 import { presetSources, presets, presetZones } from '../db/schema.js'
 
