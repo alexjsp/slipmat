@@ -8,9 +8,11 @@ import { ZodError } from 'zod'
 import type { Config } from './config.js'
 import type { Logger } from './logger.js'
 import { registerPlaybackRoutes } from './routes/playback.js'
+import { registerSourceRoutes } from './routes/sources.js'
 import { registerSystemRoutes } from './routes/system.js'
 import { createDriver } from './sonos/create-driver.js'
 import type { SonosDriver } from './sonos/driver.js'
+import { SourceResolver } from './sources/resolver.js'
 import { SystemStateStore } from './state/store.js'
 
 export type BuildServerOptions = {
@@ -52,6 +54,14 @@ export async function buildServer({
 
   await registerSystemRoutes(app, { store })
   await registerPlaybackRoutes(app, { driver, store })
+
+  const resolver = new SourceResolver({
+    driver,
+    logger,
+    utilityZoneId: config.utilityZoneId,
+    allowScratchQueueExpansion: config.allowQueueExpansion,
+  })
+  await registerSourceRoutes(app, { driver, resolver })
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
