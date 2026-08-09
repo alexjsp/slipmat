@@ -10,3 +10,4 @@ data/
 *.log
 coverage/
 .vite/
+packages/server/public/

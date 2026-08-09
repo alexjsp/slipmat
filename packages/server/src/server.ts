@@ -2,29 +2,53 @@ import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fastifyStatic from '@fastify/static'
-import Fastify from 'fastify'
+import fastifyWebsocket from '@fastify/websocket'
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify'
 import type { Config } from './config.js'
 import type { Logger } from './logger.js'
+import { registerSystemRoutes } from './routes/system.js'
+import { createDriver } from './sonos/create-driver.js'
+import type { SonosDriver } from './sonos/driver.js'
+import { SystemStateStore } from './state/store.js'
 
 export type BuildServerOptions = {
   config: Config
   logger: Logger
+  /** Injected by tests so nothing ever reaches a real household. */
+  driver?: SonosDriver
 }
 
-/**
- * Return type is inferred rather than annotated: passing `loggerInstance`
- * specialises Fastify's logger generic, and a plain `FastifyInstance`
- * annotation would widen it back and fail to typecheck.
- */
-export type App = Awaited<ReturnType<typeof buildServer>>
+export type App = FastifyInstance
 
-export async function buildServer({ config, logger }: BuildServerOptions) {
-  const app = Fastify({ loggerInstance: logger, trustProxy: true })
+export async function buildServer({
+  config,
+  logger,
+  driver: injected,
+}: BuildServerOptions): Promise<App> {
+  // Widened to FastifyBaseLogger deliberately: passing pino's concrete Logger
+  // specialises Fastify's logger generic, which then makes every route module
+  // typed against a plain FastifyInstance incompatible.
+  const app = Fastify({ loggerInstance: logger as FastifyBaseLogger, trustProxy: true })
+
+  const driver = injected ?? createDriver(config, logger)
+  await driver.start()
+
+  const store = new SystemStateStore(driver)
+
+  app.addHook('onClose', async () => {
+    store.close()
+    await driver.stop()
+  })
+
+  await app.register(fastifyWebsocket)
 
   app.get('/api/health', async () => ({
     status: 'ok',
     version: process.env.DOMOVOI_VERSION ?? 'dev',
+    sonosReady: store.current.ready,
   }))
+
+  await registerSystemRoutes(app, { store })
 
   // The built SPA is copied next to the server bundle in the Docker image. In
   // dev it doesn't exist and Vite serves the UI on its own port instead.
@@ -41,6 +65,5 @@ export async function buildServer({ config, logger }: BuildServerOptions) {
     logger.warn({ webRoot }, 'no built UI found; serving API only')
   }
 
-  void config
   return app
 }

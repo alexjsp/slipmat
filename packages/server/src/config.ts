@@ -21,6 +21,8 @@ const envSchema = z.object({
   DOMOVOI_SEED_IP: z.string().optional(),
   /** Address the speakers should dial back into for UPnP events. */
   DOMOVOI_CALLBACK_HOST: z.string().optional(),
+  /** Run against the in-memory household instead of real speakers. */
+  DOMOVOI_FAKE_SONOS: boolish,
 
   DOMOVOI_HOMEKIT: boolish,
   DOMOVOI_HOMEKIT_PIN: z.string().default('031-45-154'),
@@ -37,6 +39,7 @@ export type Config = {
   allowedHosts: string[]
   seedIp: string | undefined
   callbackHost: string | undefined
+  fakeSonos: boolean
   homekit: { enabled: boolean; pin: string; name: string }
 }
 
@@ -55,6 +58,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         .filter(Boolean) ?? [],
     seedIp: parsed.DOMOVOI_SEED_IP,
     callbackHost: parsed.DOMOVOI_CALLBACK_HOST,
+    fakeSonos: parsed.DOMOVOI_FAKE_SONOS,
     homekit: {
       enabled: parsed.DOMOVOI_HOMEKIT,
       pin: parsed.DOMOVOI_HOMEKIT_PIN,

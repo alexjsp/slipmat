@@ -8,5 +8,6 @@
     "lib": ["ES2023"]
   },
   "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"],
   "references": [{ "path": "../shared" }]
 }
