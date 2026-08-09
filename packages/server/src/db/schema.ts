@@ -115,3 +115,23 @@ export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
 })
+
+/**
+ * Conditional rules: "add throwbacks on Thursdays", "wind down after 21:00".
+ * Additive, so presets created before this existed need no migration.
+ */
+export const presetRules = sqliteTable(
+  'preset_rules',
+  {
+    id: text('id').primaryKey(),
+    presetId: text('preset_id')
+      .notNull()
+      .references(() => presets.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    label: text('label').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    conditionJson: text('condition_json').notNull().default('{}'),
+    effectJson: text('effect_json').notNull().default('{}'),
+  },
+  (table) => [index('preset_rules_preset').on(table.presetId, table.position)],
+)

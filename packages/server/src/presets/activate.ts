@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { ActivationResult, Preset } from '@domovoi/shared'
+import type { ActivationResult, Preset, SourceKind } from '@domovoi/shared'
 import { and, eq } from 'drizzle-orm'
 import type { Db } from '../db/index.js'
 import { activations } from '../db/schema.js'
@@ -9,7 +9,9 @@ import { classifyPlaybackKind, isProtectedFromPauseAll } from '../sonos/uris.js'
 import type { SourceCache } from '../sources/cache.js'
 import type { ResolvedTrack } from '../sources/resolver.js'
 import type { SystemStateStore } from '../state/store.js'
+import type { PresetRepository } from './repository.js'
 import { pickCoordinator } from './repository.js'
+import { clockFrom, evaluateRules } from './rules.js'
 import { buildQueue } from './shuffle.js'
 
 /**
@@ -25,6 +27,11 @@ export type ActivationDeps = {
   store: SystemStateStore
   cache: SourceCache
   logger: Logger
+  repo: PresetRepository
+  /** IANA zone for evaluating time-based rules. */
+  timeZone: string
+  /** Injectable so rule behaviour can be tested without waiting for Thursday. */
+  now?: () => Date
 }
 
 export class ActivationEngine {
@@ -83,7 +90,27 @@ export class ActivationEngine {
     }
     const members = preset.zones.filter((zone) => reachable.has(zone.zoneId))
 
-    const resolved = await this.resolveSources(preset, warnings)
+    // Rules are evaluated once, here — a preset started at 20:59 does not
+    // mutate into the wind-down version at 21:00 while someone is listening.
+    const rules = this.deps.repo.rulesFor(preset.id)
+    const clock = clockFrom((this.deps.now ?? (() => new Date()))(), this.deps.timeZone)
+    const effective = evaluateRules(preset, rules, clock)
+    if (effective.appliedRuleLabels.length > 0) {
+      this.logger.info(
+        { presetId: preset.id, rules: effective.appliedRuleLabels },
+        'applied conditional rules',
+      )
+    }
+
+    // Volumes and flags come from the rule-adjusted view from here on.
+    const volumeByZone = new Map(effective.zoneVolumes.map((zone) => [zone.zoneId, zone.volume]))
+    const flags = {
+      repeatAll: effective.repeatAll,
+      crossfade: effective.crossfade,
+      pauseOthers: effective.pauseOthers,
+    }
+
+    const resolved = await this.resolveSources(effective.sources, warnings)
     const streamSource = resolved.find((source) => source.mode === 'stream')
     const containerOnly = resolved.filter((source) => source.mode === 'container_only')
 
@@ -93,7 +120,7 @@ export class ActivationEngine {
       preset.id,
     )
 
-    if (preset.pauseOthers) {
+    if (flags.pauseOthers) {
       await this.pauseOtherGroups(members.map((zone) => zone.zoneId))
     }
 
@@ -102,8 +129,11 @@ export class ActivationEngine {
       members.map((zone) => zone.zoneId),
       warnings,
     )
-    await this.applyVolumes(members, warnings)
-    await this.deps.driver.setCrossfade(coordinator.zoneId, preset.crossfade).catch(() => {
+    await this.applyVolumes(
+      members.map((zone) => ({ ...zone, volume: volumeByZone.get(zone.zoneId) ?? zone.volume })),
+      warnings,
+    )
+    await this.deps.driver.setCrossfade(coordinator.zoneId, flags.crossfade).catch(() => {
       warnings.push('Crossfade could not be set')
     })
 
@@ -169,7 +199,7 @@ export class ActivationEngine {
       warnings.push(`"${source.label}" could not be mixed in and was skipped`)
     }
 
-    await this.startQueue(coordinator.zoneId, preset, pool)
+    await this.startQueue(coordinator.zoneId, flags.repeatAll, pool)
 
     this.recordActivation({
       activationId,
@@ -236,9 +266,12 @@ export class ActivationEngine {
 
   // --- steps --------------------------------------------------------------
 
-  private async resolveSources(preset: Preset, warnings: string[]) {
+  private async resolveSources(
+    sources: { kind: SourceKind; ref: string; label: string }[],
+    warnings: string[],
+  ) {
     const resolved = []
-    for (const source of preset.sources) {
+    for (const source of sources) {
       try {
         resolved.push(
           await this.deps.cache.get({ kind: source.kind, ref: source.ref, label: source.label }),
@@ -294,7 +327,7 @@ export class ActivationEngine {
     }
   }
 
-  private async startQueue(coordinatorZoneId: string, preset: Preset, pool: ResolvedTrack[]) {
+  private async startQueue(coordinatorZoneId: string, repeatAll: boolean, pool: ResolvedTrack[]) {
     await this.deps.driver.clearQueue(coordinatorZoneId)
     await this.deps.driver.addUrisToQueue(
       coordinatorZoneId,
@@ -305,10 +338,7 @@ export class ActivationEngine {
     )
     // Already shuffled, so NORMAL — letting Sonos shuffle too would undo the
     // careful cross-source interleave.
-    await this.deps.driver.setPlayMode(
-      coordinatorZoneId,
-      preset.repeatAll ? 'REPEAT_ALL' : 'NORMAL',
-    )
+    await this.deps.driver.setPlayMode(coordinatorZoneId, repeatAll ? 'REPEAT_ALL' : 'NORMAL')
     await this.deps.driver.setTransportToQueue(coordinatorZoneId)
     await this.deps.driver.play(coordinatorZoneId)
   }

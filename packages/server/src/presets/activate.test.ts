@@ -68,7 +68,15 @@ describe('ActivationEngine', () => {
     const cache = new SourceCache(db, resolver, logger)
 
     repo = new PresetRepository(db)
-    engine = new ActivationEngine({ db, driver, store, cache, logger })
+    engine = new ActivationEngine({
+      db,
+      driver,
+      store,
+      cache,
+      logger,
+      repo,
+      timeZone: 'UTC',
+    })
     zoneNames = new Map(driver.snapshot().zones.map((zone) => [zone.id, zone.name]))
   })
 
@@ -235,6 +243,90 @@ describe('ActivationEngine', () => {
     expect(group?.transportState).toBe('PAUSED_PLAYBACK')
     expect(group?.memberZoneIds.sort()).toEqual([BEDROOM, KITCHEN])
     expect(driver.queueOf(KITCHEN)).toEqual(queue)
+  })
+
+  describe('conditional rules', () => {
+    const buildEngineAt = (now: Date) => {
+      const db2 = openDatabase({ inMemory: true })
+      const store2 = new SystemStateStore(driver)
+      const cache2 = new SourceCache(
+        db2,
+        new SourceResolver({ driver, logger, allowScratchQueueExpansion: true }),
+        logger,
+      )
+      const repo2 = new PresetRepository(db2)
+      const engine2 = new ActivationEngine({
+        db: db2,
+        driver,
+        store: store2,
+        cache: cache2,
+        logger,
+        repo: repo2,
+        timeZone: 'UTC',
+        now: () => now,
+      })
+      return { repo: repo2, engine: engine2 }
+    }
+
+    it('adds a source on the day the rule names', async () => {
+      // 2026-06-18 is a Thursday.
+      const { repo: r, engine: e } = buildEngineAt(new Date('2026-06-18T10:00:00Z'))
+      const preset = r.create(presetInput(), zoneNames)
+      r.setRules(preset.id, [
+        {
+          label: 'Throwback Thursday',
+          enabled: true,
+          condition: { daysOfWeek: [4] },
+          effect: { addSources: [{ kind: 'sonos_playlist', ref: 'SQ:2', label: 'Rock' }] },
+        },
+      ])
+
+      await e.activate(preset)
+      const queue = driver.queueOf(KITCHEN)
+      expect(queue.some((uri) => uri.startsWith('rock'))).toBe(true)
+      expect(queue.some((uri) => uri.startsWith('jazz'))).toBe(true)
+    })
+
+    it('leaves the preset alone on a day the rule does not name', async () => {
+      // 2026-06-19 is a Friday.
+      const { repo: r, engine: e } = buildEngineAt(new Date('2026-06-19T10:00:00Z'))
+      const preset = r.create(presetInput(), zoneNames)
+      r.setRules(preset.id, [
+        {
+          label: 'Throwback Thursday',
+          enabled: true,
+          condition: { daysOfWeek: [4] },
+          effect: { addSources: [{ kind: 'sonos_playlist', ref: 'SQ:2', label: 'Rock' }] },
+        },
+      ])
+
+      await e.activate(preset)
+      expect(driver.queueOf(KITCHEN).every((uri) => uri.startsWith('jazz'))).toBe(true)
+    })
+
+    it('replaces sources and lowers volumes for a late-evening wind-down', async () => {
+      const { repo: r, engine: e } = buildEngineAt(new Date('2026-06-18T22:30:00Z'))
+      const preset = r.create(presetInput(), zoneNames)
+      r.setRules(preset.id, [
+        {
+          label: 'Wind down',
+          enabled: true,
+          condition: { timeOfDay: { from: '21:00', to: '05:00' } },
+          effect: {
+            replaceSources: [{ kind: 'sonos_playlist', ref: 'SQ:2', label: 'Wind Down' }],
+            volumeDelta: -20,
+          },
+        },
+      ])
+
+      await e.activate(preset)
+
+      expect(driver.queueOf(KITCHEN).every((uri) => uri.startsWith('rock'))).toBe(true)
+      const zones = driver.snapshot().zones
+      // 30 -> 10 and 15 -> 0 (clamped).
+      expect(zones.find((z) => z.id === KITCHEN)?.volume).toBe(10)
+      expect(zones.find((z) => z.id === BEDROOM)?.volume).toBe(0)
+    })
   })
 
   describe('active-state detection', () => {

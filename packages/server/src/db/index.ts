@@ -87,6 +87,17 @@ const DDL = [
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   )`,
 
+  `CREATE TABLE IF NOT EXISTS preset_rules (
+    id TEXT PRIMARY KEY,
+    preset_id TEXT NOT NULL REFERENCES presets(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    condition_json TEXT NOT NULL DEFAULT '{}',
+    effect_json TEXT NOT NULL DEFAULT '{}'
+  )`,
+  `CREATE INDEX IF NOT EXISTS preset_rules_preset ON preset_rules (preset_id, position)`,
+
   `CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL

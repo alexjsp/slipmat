@@ -82,7 +82,15 @@ export async function buildServer({
       : openDatabase({ dataDir: config.dataDir })
   const cache = new SourceCache(db, resolver, logger)
   const repo = new PresetRepository(db)
-  const engine = new ActivationEngine({ db, driver, store, cache, logger })
+  const engine = new ActivationEngine({
+    db,
+    driver,
+    store,
+    cache,
+    logger,
+    repo,
+    timeZone: config.timeZone,
+  })
   const settings = new SettingsStore(db)
 
   // Reality can drift while we're not looking (someone pauses in the Sonos app,
@@ -109,6 +117,7 @@ export async function buildServer({
     driver,
     cache,
     onPresetsChanged: () => homekit?.sync(),
+    timeZone: config.timeZone,
   })
   await registerWebhookRoutes(app, { repo, engine, driver, store, settings })
 

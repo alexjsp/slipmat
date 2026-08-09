@@ -35,6 +35,12 @@ const envSchema = z.object({
   /** Zone to borrow for expansion. Unset picks any idle zone with no queue. */
   DOMOVOI_UTILITY_ZONE: z.string().optional(),
 
+  /**
+   * IANA timezone for evaluating time-based preset rules. Explicit, because
+   * "after 21:00" silently meaning UTC only surfaces in December.
+   */
+  DOMOVOI_TZ: z.string().default(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'),
+
   DOMOVOI_HOMEKIT: boolish,
   DOMOVOI_HOMEKIT_PIN: z.string().default('031-45-154'),
   DOMOVOI_HOMEKIT_NAME: z.string().default('Domovoi'),
@@ -53,6 +59,7 @@ export type Config = {
   fakeSonos: boolean
   allowQueueExpansion: boolean
   utilityZoneId: string | undefined
+  timeZone: string
   homekit: { enabled: boolean; pin: string; name: string }
 }
 
@@ -74,6 +81,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     fakeSonos: parsed.DOMOVOI_FAKE_SONOS,
     allowQueueExpansion: parsed.DOMOVOI_ALLOW_QUEUE_EXPANSION,
     utilityZoneId: parsed.DOMOVOI_UTILITY_ZONE,
+    timeZone: parsed.DOMOVOI_TZ,
     homekit: {
       enabled: parsed.DOMOVOI_HOMEKIT,
       pin: parsed.DOMOVOI_HOMEKIT_PIN,

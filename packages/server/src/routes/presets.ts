@@ -1,13 +1,16 @@
 import type { Preset, PresetStatus } from '@domovoi/shared'
-import { presetInputSchema } from '@domovoi/shared'
+import { presetInputSchema, presetRuleInputSchema } from '@domovoi/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { ActivationEngine } from '../presets/activate.js'
 import type { PresetRepository } from '../presets/repository.js'
+import { clockFrom, evaluateRules } from '../presets/rules.js'
 import type { SonosDriver } from '../sonos/driver.js'
 import type { SourceCache } from '../sources/cache.js'
 
 export type PresetRoutesDeps = {
+  /** IANA zone for the "what would this do right now?" preview. */
+  timeZone: string
   repo: PresetRepository
   engine: ActivationEngine
   driver: SonosDriver
@@ -20,7 +23,7 @@ const idParamsSchema = z.object({ id: z.string().min(1) })
 
 export async function registerPresetRoutes(
   app: FastifyInstance,
-  { repo, engine, driver, cache, onPresetsChanged }: PresetRoutesDeps,
+  { repo, engine, driver, cache, onPresetsChanged, timeZone }: PresetRoutesDeps,
 ) {
   const changed = () => onPresetsChanged?.()
   const zoneNames = () =>
@@ -144,6 +147,44 @@ export async function registerPresetRoutes(
       await cache.refresh({ kind: source.kind, ref: source.ref, label: source.label })
     }
     return { preset: withSourceMeta(repo.get(id)!) }
+  })
+
+  // --- conditional rules --------------------------------------------------
+
+  app.get('/api/presets/:id/rules', async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params)
+    const preset = repo.get(id)
+    if (!preset) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
+    return {
+      rules: repo.rulesFor(id),
+      // What this preset would actually do if fired right now — so a rule can
+      // be checked without waiting for Thursday.
+      preview: evaluateRules(preset, repo.rulesFor(id), clockFrom(new Date(), timeZone)),
+    }
+  })
+
+  app.put('/api/presets/:id/rules', async (request, reply) => {
+    const { id } = idParamsSchema.parse(request.params)
+    const preset = repo.get(id)
+    if (!preset) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
+
+    const body = z.object({ rules: z.array(presetRuleInputSchema) }).parse(request.body)
+    const rules = repo.setRules(id, body.rules)
+
+    // Rules can introduce sources the cache has never seen; warm them now so
+    // the first matching activation isn't the one that pays for a cold resolve.
+    void Promise.allSettled(
+      rules.flatMap((rule) =>
+        [...(rule.effect.addSources ?? []), ...(rule.effect.replaceSources ?? [])].map((source) =>
+          cache.get(source),
+        ),
+      ),
+    )
+
+    return {
+      rules,
+      preview: evaluateRules(preset, rules, clockFrom(new Date(), timeZone)),
+    }
   })
 
   app.get('/api/presets/export', async () => ({ presets: repo.list() }))

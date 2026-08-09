@@ -1,5 +1,6 @@
 export * from './api.js'
 export * from './events.js'
 export * from './presets.js'
+export * from './rules.js'
 export * from './sources.js'
 export * from './zones.js'

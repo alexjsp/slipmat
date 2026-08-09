@@ -1,6 +1,7 @@
 import type { Preset, PresetInput, Zone } from '@domovoi/shared'
 import { Check, Copy, GripVertical, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { RuleEditor } from '@/components/rule-editor'
 import { SourcePicker } from '@/components/source-picker'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -287,6 +288,12 @@ export function PresetEditor({
                 onChange={(value) => patch({ homekitEnabled: value })}
               />
             </section>
+
+            {preset && (
+              <div className="border-t pt-6">
+                <RuleEditor presetId={preset.id} />
+              </div>
+            )}
 
             {preset && (
               <section className="flex flex-col gap-2">

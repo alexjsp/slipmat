@@ -1,8 +1,15 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import type { Preset, PresetInput, PresetSource, PresetZone } from '@domovoi/shared'
+import type {
+  Preset,
+  PresetInput,
+  PresetRule,
+  PresetRuleInput,
+  PresetSource,
+  PresetZone,
+} from '@domovoi/shared'
 import { asc, eq } from 'drizzle-orm'
 import type { Db, DbTx } from '../db/index.js'
-import { presetSources, presets, presetZones } from '../db/schema.js'
+import { presetRules, presetSources, presets, presetZones } from '../db/schema.js'
 
 export type ResolvedSourceMeta = {
   mode: string
@@ -147,6 +154,46 @@ export class PresetRepository {
         })
         .run()
     }
+  }
+
+  /** Rules for a preset, in the order they should be applied. */
+  rulesFor(presetId: string): PresetRule[] {
+    return this.db
+      .select()
+      .from(presetRules)
+      .where(eq(presetRules.presetId, presetId))
+      .orderBy(asc(presetRules.position))
+      .all()
+      .map((row) => ({
+        id: row.id,
+        presetId: row.presetId,
+        position: row.position,
+        label: row.label,
+        enabled: row.enabled,
+        condition: JSON.parse(row.conditionJson),
+        effect: JSON.parse(row.effectJson),
+      }))
+  }
+
+  /** Replaced wholesale — rules are few, ordered, and edited as a list. */
+  setRules(presetId: string, rules: PresetRuleInput[]): PresetRule[] {
+    this.db.transaction((tx) => {
+      tx.delete(presetRules).where(eq(presetRules.presetId, presetId)).run()
+      for (const [position, rule] of rules.entries()) {
+        tx.insert(presetRules)
+          .values({
+            id: randomUUID(),
+            presetId,
+            position,
+            label: rule.label,
+            enabled: rule.enabled,
+            conditionJson: JSON.stringify(rule.condition),
+            effectJson: JSON.stringify(rule.effect),
+          })
+          .run()
+      }
+    })
+    return this.rulesFor(presetId)
   }
 
   private hydrate(row: typeof presets.$inferSelect): Preset {
