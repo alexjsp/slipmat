@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App.tsx'
+import { AuthGate } from './components/auth-gate.tsx'
 import './index.css'
 
 // Live state arrives over the WebSocket, so polling would only add noise.
@@ -15,7 +16,9 @@ if (!root) throw new Error('missing #root')
 createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <AuthGate>
+        <App />
+      </AuthGate>
     </QueryClientProvider>
   </StrictMode>,
 )

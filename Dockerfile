@@ -13,7 +13,7 @@ FROM base AS deps
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
-COPY pnpm-workspace.yaml package.json ./
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/server/package.json packages/server/
 COPY packages/web/package.json packages/web/
@@ -27,13 +27,17 @@ RUN pnpm --filter @domovoi/shared build \
   && pnpm --filter @domovoi/server build \
   && pnpm --filter @domovoi/web build
 
-# Prune to production dependencies for the runtime image.
-RUN pnpm --filter @domovoi/server --prod deploy /tmp/server
+# Prune to production dependencies for the runtime image. --legacy because
+# @domovoi/shared is a plain workspace link rather than an injected dependency;
+# pnpm 10 otherwise refuses to deploy.
+RUN pnpm --filter @domovoi/server --prod deploy --legacy /tmp/server
 
 # ---- runtime ----------------------------------------------------------------
 FROM node:24-bookworm-slim AS runtime
+ARG DOMOVOI_VERSION=dev
 ENV NODE_ENV=production
 ENV DOMOVOI_DATA_DIR=/data
+ENV DOMOVOI_VERSION=${DOMOVOI_VERSION}
 WORKDIR /app
 
 RUN useradd --system --uid 10001 --create-home domovoi \

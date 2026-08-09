@@ -5,6 +5,7 @@ import fastifyStatic from '@fastify/static'
 import fastifyWebsocket from '@fastify/websocket'
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify'
 import { ZodError } from 'zod'
+import { registerAuth } from './auth.js'
 import type { Config } from './config.js'
 import { openDatabase } from './db/index.js'
 import type { HomeKitBridge } from './homekit/bridge.js'
@@ -53,6 +54,10 @@ export async function buildServer({
   })
 
   await app.register(fastifyWebsocket)
+
+  // Registered before any route so the Host check and session guard see
+  // everything, including the WebSocket upgrade.
+  await registerAuth(app, { config, logger })
 
   app.get('/api/health', async () => ({
     status: 'ok',
