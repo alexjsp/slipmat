@@ -56,6 +56,22 @@ A preset holds ordered `sources[]`, each one of `sonos_playlist` (`SQ:n`) | `son
   2. **Scratch-queue expansion** — `AddURIToQueue(container)` on a utility player, `Browse("Q:0")` to read back the per-track URIs Sonos itself expanded, then restore. Service-agnostic and the likelier winner.
 - Resolved lists are **cached in SQLite** with a TTL, refreshed in the background (never on the activation path) plus a manual refresh button.
 
+**M3 spike result (validated against a real household, 2026-08-09): scratch-queue
+expansion works.** An Apple Music library-playlist favourite expanded into 25
+individual track URIs on a real speaker, which was then restored. Three details
+turned out to be load-bearing and are now covered by tests:
+
+- Browse must use raw DIDL, not the library's parsed `Track[]` — the parser
+  percent-decodes `res` (`%3a` → `:`), which Sonos then rejects with UPnP 402.
+- A container must be enqueued with `AddURIToQueue`, not
+  `AddMultipleURIsToQueue` — the latter only accepts individual track URIs.
+- The container's own `r:resMD` must be passed through **still XML-encoded**. It
+  carries the `<desc id="cdudn">SA_RINCON…-Token</desc>` service token; without
+  it Sonos returns UPnP 800, and decoding it returns UPnP 402.
+
+Also found: Sonos playlists (`SQ:`) browse straight into individual track URIs
+with no expansion at all, so the most common case never needs the scratch queue.
+
 **Spike this before anything else is built on it (M3).** If a source can't be expanded, the UI marks it *container-only*: it can still play whole under Sonos' native shuffle, it just can't be cross-shuffled with other sources.
 
 Scratch-queue safety: prefer a player that is idle **and** has an empty queue; otherwise `SaveQueue` → expand → clear → restore → delete the temp playlist. The utility zone is configurable in settings.

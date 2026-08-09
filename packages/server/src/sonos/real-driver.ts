@@ -6,6 +6,7 @@ import { PlayMode } from '@svrooij/sonos/lib/models/playmode.js'
 import type { ZoneGroup } from '@svrooij/sonos/lib/models/zone-group.js'
 import type { AVTransportServiceEvent } from '@svrooij/sonos/lib/services/index.js'
 import type { Logger } from '../logger.js'
+import { isContainerClass, parseDidl } from './didl.js'
 import type {
   DriverBrowseItem,
   DriverBrowseResult,
@@ -185,6 +186,54 @@ export class RealSonosDriver implements SonosDriver {
       this.logger.warn({ err, zone: device.Name }, 'event subscription error')
       this.patch(uuid, { unreachable: true })
     })
+
+    void this.prime(device)
+  }
+
+  /**
+   * Read a device's current state once at attach time.
+   *
+   * Without this everything reads as volume 0 / STOPPED until the speaker
+   * happens to send its first event, which can be minutes — long enough for the
+   * UI to show a wrong picture and for a preset to make decisions on it.
+   * All of these calls are read-only.
+   */
+  private async prime(device: SonosDevice) {
+    const uuid = device.Uuid
+    try {
+      const [volume, mute, transport, media] = await Promise.all([
+        device.RenderingControlService.GetVolume({ InstanceID: 0, Channel: 'Master' }),
+        device.RenderingControlService.GetMute({ InstanceID: 0, Channel: 'Master' }),
+        device.AVTransportService.GetTransportInfo({ InstanceID: 0 }),
+        device.AVTransportService.GetMediaInfo({ InstanceID: 0 }),
+      ])
+
+      const state = transport.CurrentTransportState
+      this.patch(uuid, {
+        volume: volume.CurrentVolume,
+        muted: mute.CurrentMute,
+        transportState:
+          state === 'PLAYING' || state === 'PAUSED_PLAYBACK' || state === 'TRANSITIONING'
+            ? state
+            : 'STOPPED',
+        transportUri: media.CurrentURI || null,
+        unreachable: false,
+      })
+
+      // Position and track only make sense while something is loaded.
+      if (media.CurrentURI) {
+        const position = await device.AVTransportService.GetPositionInfo({ InstanceID: 0 })
+        this.patch(uuid, {
+          currentTrackUri: position.TrackURI || null,
+          currentTrack: this.toDriverTrack(uuid, position.TrackMetaData, position.TrackURI),
+          positionSeconds: parseDuration(position.RelTime) ?? 0,
+          positionUpdatedAt: Date.now(),
+        })
+      }
+    } catch (err) {
+      this.logger.debug({ err, zone: device.Name }, 'failed to prime device state')
+      this.patch(uuid, { unreachable: true })
+    }
   }
 
   private applyAvTransport(uuid: string, data: AVTransportServiceEvent) {
@@ -519,6 +568,8 @@ export class RealSonosDriver implements SonosDriver {
     const device = this.manager?.Devices[0]
     if (!device) throw new Error('No Sonos devices available')
 
+    // Raw Browse, then our own DIDL reader — see didl.ts for why the library's
+    // parsed form can't be used here (it decodes res and drops r:resMD).
     const response = await device.ContentDirectoryService.Browse({
       ObjectID: objectId,
       BrowseFlag: 'BrowseDirectChildren',
@@ -528,11 +579,24 @@ export class RealSonosDriver implements SonosDriver {
       SortCriteria: '',
     })
 
-    // The service parses DIDL for us when it can; a raw string means it didn't.
-    const tracks: SonosTrack[] = typeof response.Result === 'string' ? [] : response.Result
+    const encoded = typeof response.Result === 'string' ? response.Result : ''
+    const entries = parseDidl(encoded)
+
     return {
-      items: tracks.map((track) => toBrowseItem(track, device.Host)),
-      total: response.TotalMatches ?? tracks.length,
+      items: entries.map((entry) => ({
+        id: entry.id,
+        title: entry.title || 'Unknown',
+        subtitle: entry.creator ?? entry.album ?? null,
+        artUrl: entry.albumArtUri
+          ? new URL(entry.albumArtUri, `http://${device.Host}:1400`).toString()
+          : null,
+        isContainer: isContainerClass(entry.upnpClass),
+        uri: entry.res,
+        // A favourite's resMD is the container's own metadata, which Sonos
+        // requires when the container is enqueued.
+        metadata: entry.resMD,
+      })),
+      total: response.TotalMatches ?? entries.length,
     }
   }
 
@@ -562,6 +626,22 @@ export class RealSonosDriver implements SonosDriver {
 
   async addUrisToQueue(zoneId: string, items: { uri: string; metadata?: string }[]): Promise<void> {
     const device = this.coordinatorFor(zoneId)
+
+    // AddMultipleURIsToQueue only accepts individual track URIs — handing it a
+    // container gets a UPnP 402. Containers have to go through the single-item
+    // call, which is what makes Sonos expand them.
+    const containers = items.filter((item) => isContainerUri(item.uri))
+    for (const container of containers) {
+      await device.AVTransportService.AddURIToQueue({
+        InstanceID: 0,
+        EnqueuedURI: container.uri,
+        EnqueuedURIMetaData: container.metadata ?? '',
+        DesiredFirstTrackNumberEnqueued: 0,
+        EnqueueAsNext: false,
+      })
+    }
+    items = items.filter((item) => !isContainerUri(item.uri))
+    if (items.length === 0) return
     // AddMultipleURIsToQueue takes at most ~16 URIs per SOAP call, so a large
     // preset is dozens of sequential round-trips. Callers enqueue a small head,
     // start playback, then append the rest in the background.
@@ -655,4 +735,11 @@ function toBrowseItem(track: SonosTrack, host: string): DriverBrowseItem {
     uri: track.TrackUri ?? null,
     metadata: MetaDataHelper.TrackToMetaData(track, true, track.CdUdn),
   }
+}
+
+/** Containers are expanded by Sonos; individual tracks are not. */
+function isContainerUri(uri: string): boolean {
+  return (
+    uri.startsWith('x-rincon-cpcontainer:') || uri.startsWith('file:///jffs/settings/savedqueues')
+  )
 }
