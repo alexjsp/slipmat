@@ -4,13 +4,14 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { getJson } from '@/lib/api'
 import { useHomeKit } from '@/lib/use-homekit'
 
 export function SettingsPage() {
   const homekit = useHomeKit()
   const pauseAll = useQuery({
     queryKey: ['pause-all-token'],
-    queryFn: async () => (await fetch('/api/pause-all/token')).json() as Promise<{ token: string }>,
+    queryFn: () => getJson<{ token: string }>('/api/pause-all/token'),
   })
 
   return (

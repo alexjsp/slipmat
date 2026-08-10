@@ -1,6 +1,7 @@
 import { CalendarClock, ListMusic, Settings, Speaker, WifiOff } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Route, Switch, useLocation } from 'wouter'
+import { ErrorBoundary } from '@/components/error-boundary'
 import { PauseAllButton } from '@/components/pause-all-button'
 import { useSystemState } from '@/lib/system-state'
 import { cn } from '@/lib/utils'
@@ -8,6 +9,12 @@ import { NowPlayingPage } from '@/pages/now-playing'
 import { PresetsPage } from '@/pages/presets'
 import { SchedulesPage } from '@/pages/schedules'
 import { SettingsPage } from '@/pages/settings'
+
+const PAGE_LABELS: Record<string, string> = {
+  '/presets': 'Presets',
+  '/schedules': 'Schedules',
+  '/settings': 'Settings',
+}
 
 export function App() {
   const { state, status } = useSystemState()
@@ -97,20 +104,24 @@ export function App() {
             No Sonos devices found yet. Check host networking, or set <code>SLIPMAT_SEED_IP</code>.
           </p>
         ) : (
-          <Switch>
-            <Route path="/presets">
-              <PresetsPage zones={state.zones} onError={onError} />
-            </Route>
-            <Route path="/schedules">
-              <SchedulesPage onError={onError} />
-            </Route>
-            <Route path="/settings">
-              <SettingsPage />
-            </Route>
-            <Route>
-              <NowPlayingPage state={state} onError={onError} />
-            </Route>
-          </Switch>
+          // Per route, and keyed by location: a page that throws leaves the
+          // header and navigation intact, and moving away resets it.
+          <ErrorBoundary key={location} label={PAGE_LABELS[location] ?? 'This page'}>
+            <Switch>
+              <Route path="/presets">
+                <PresetsPage zones={state.zones} onError={onError} />
+              </Route>
+              <Route path="/schedules">
+                <SchedulesPage onError={onError} />
+              </Route>
+              <Route path="/settings">
+                <SettingsPage />
+              </Route>
+              <Route>
+                <NowPlayingPage state={state} onError={onError} />
+              </Route>
+            </Switch>
+          </ErrorBoundary>
         )}
       </main>
     </div>

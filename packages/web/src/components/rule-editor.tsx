@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { getJson } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 const DAYS = [
@@ -47,8 +48,7 @@ export function RuleEditor({ presetId }: { presetId: string }) {
 
   const query = useQuery({
     queryKey: ['rules', presetId],
-    queryFn: async () =>
-      (await fetch(`/api/presets/${presetId}/rules`)).json() as Promise<RulesResponse>,
+    queryFn: async () => getJson<RulesResponse>(`/api/presets/${presetId}/rules`),
   })
 
   useEffect(() => {

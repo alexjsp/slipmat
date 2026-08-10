@@ -64,7 +64,18 @@ export type Config = {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const parsed = envSchema.parse(env)
+  // An empty value means "not set", and has to be stripped before Zod sees it.
+  //
+  // A Zod `.default()` only fires when the key is *absent*, so an empty string
+  // sails straight through as a real value. Docker Compose hands one over for
+  // every `${VAR:-}` it interpolates, and a hand-written `.env` line like
+  // `SLIPMAT_TZ=` does the same — which took the deployed instance's scheduler
+  // down every 20 seconds with `Invalid time zone specified: ` and turned the
+  // rules endpoint into a 500.
+  const present = Object.fromEntries(
+    Object.entries(env).filter(([, value]) => value !== undefined && value !== ''),
+  )
+  const parsed = envSchema.parse(present)
   return {
     host: parsed.SLIPMAT_HOST,
     port: parsed.SLIPMAT_PORT,

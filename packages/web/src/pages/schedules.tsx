@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { getJson } from '@/lib/api'
 import { usePresets } from '@/lib/presets'
 import { cn } from '@/lib/utils'
 
@@ -33,7 +34,7 @@ export function SchedulesPage({ onError }: { onError: (message: string) => void 
 
   const query = useQuery({
     queryKey: ['triggers'],
-    queryFn: async () => (await fetch('/api/triggers')).json() as Promise<TriggersResponse>,
+    queryFn: () => getJson<TriggersResponse>('/api/triggers'),
   })
 
   const invalidate = () => {
