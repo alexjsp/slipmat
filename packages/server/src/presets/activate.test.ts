@@ -255,14 +255,15 @@ describe('ActivationEngine', () => {
     expect(group?.transportState).toBe('PLAYING')
   })
 
-  it('puts only repeat in the play mode, never shuffle', async () => {
-    // Sonos ignores SHUFFLE, so claiming it would misdescribe what the speaker
-    // is doing; the queue is shuffled by reordering instead.
+  it('maps the shuffle and repeat flags onto a Sonos play mode', async () => {
     await engine.activate(create({ shuffle: true, repeatAll: true }))
-    expect(driver.playModeOf(KITCHEN)).toBe('REPEAT_ALL')
+    expect(driver.playModeOf(KITCHEN)).toBe('SHUFFLE')
 
     await engine.activate(create({ shuffle: true, repeatAll: false }), { restart: true })
-    expect(driver.playModeOf(KITCHEN)).toBe('NORMAL')
+    expect(driver.playModeOf(KITCHEN)).toBe('SHUFFLE_NOREPEAT')
+
+    await engine.activate(create({ shuffle: false, repeatAll: true }), { restart: true })
+    expect(driver.playModeOf(KITCHEN)).toBe('REPEAT_ALL')
 
     const other = create({
       name: 'Neither',
@@ -548,63 +549,76 @@ describe('ActivationEngine', () => {
       expect(secondOpener).toBe(40)
     })
 
-    it('shuffles the queue itself, because Sonos ignores the shuffle play mode', async () => {
-      // Verified against the household: SetPlayMode(SHUFFLE) reads back as
-      // SHUFFLE and playback still runs 1, 2, 3 through the queue. So the
-      // interleaving has to be real reordering.
+    it('starts somewhere random, since Sonos always opens at shuffled position 1', async () => {
+      // Verified on the household: five consecutive starts on a 2,082-track
+      // shuffled queue all opened on the same song. Sonos shuffles the order
+      // but pins what sits at the front, so the starting point is ours to pick.
       driver.setBrowseResult(
         'SQ:1',
         Array.from({ length: 30 }, (_, index) => track(`jazz-${index}`)),
       )
-      driver.setBrowseResult(
-        'SQ:2',
-        Array.from({ length: 30 }, (_, index) => track(`rock-${index}`)),
-      )
-      const preset = create({
-        dedupe: false,
-        sources: [
-          { kind: 'sonos_playlist', ref: 'SQ:1', label: 'Jazz' },
-          { kind: 'sonos_playlist', ref: 'SQ:2', label: 'Rock' },
-        ],
-      })
+      const sources = [{ kind: 'sonos_playlist' as const, ref: 'SQ:1', label: 'Jazz' }]
+      const engineWith = (random: () => number) =>
+        new ActivationEngine({ db, driver, store, cache, logger, repo, timeZone: 'UTC', random })
 
-      await engine.activate(preset)
-      await settle()
+      await engineWith(() => 0).activate(create({ name: 'Low', repeatAll: true, sources }))
+      const low = driver.calls.filter((call) => call.method === 'seekToTrack').at(-1)?.args[1]
 
-      const queue = driver.queueOf(KITCHEN)
-      expect(queue).toHaveLength(60)
-      // Same tracks, genuinely interleaved rather than one source then the other.
-      expect([...queue].sort()).toEqual(
-        [
-          ...Array.from({ length: 30 }, (_, index) => `jazz-${index}`),
-          ...Array.from({ length: 30 }, (_, index) => `rock-${index}`),
-        ].sort(),
-      )
-      const firstHalf = queue.slice(0, 30)
-      expect(firstHalf.some((uri) => uri.startsWith('jazz'))).toBe(true)
-      expect(firstHalf.some((uri) => uri.startsWith('rock'))).toBe(true)
+      await engineWith(() => 0.9).activate(create({ name: 'High', repeatAll: true, sources }))
+      const high = driver.calls.filter((call) => call.method === 'seekToTrack').at(-1)?.args[1]
+
+      expect(low).toBe(1)
+      expect(high).toBe(28)
     })
 
-    it('does not reshuffle what has already been played', async () => {
-      driver.setBrowseResult(
-        'SQ:1',
-        Array.from({ length: 20 }, (_, index) => track(`jazz-${index}`)),
+    it('does not pick a starting track when shuffle is off', async () => {
+      // The preset's order is the playback order; jumping into the middle of it
+      // would be the opposite of what was asked for.
+      driver.setBrowseResult('SQ:1', [track('a'), track('b'), track('c')])
+      await engine.activate(
+        create({ shuffle: false, sources: [{ kind: 'sonos_playlist', ref: 'SQ:1', label: 'A' }] }),
       )
-      const preset = create({ sources: [{ kind: 'sonos_playlist', ref: 'SQ:1', label: 'Jazz' }] })
-
-      await engine.activate(preset)
-      // Pretend we are five tracks in before the shuffle lands.
-      driver.setPlaying(KITCHEN, 'x-rincon-queue:k#0', 'jazz-4')
       await settle()
 
-      // The played run is untouched; bringing it back round would repeat music.
-      expect(driver.queueOf(KITCHEN).slice(0, 5)).toEqual([
-        'jazz-0',
-        'jazz-1',
-        'jazz-2',
-        'jazz-3',
-        'jazz-4',
-      ])
+      expect(driver.calls.some((call) => call.method === 'seekToTrack')).toBe(false)
+    })
+
+    it('does not pick a starting track when the queue will not loop', async () => {
+      // Starting in the middle of a queue that stops at the end means the
+      // beginning never plays. A predictable first track is the lesser evil.
+      driver.setBrowseResult(
+        'SQ:1',
+        Array.from({ length: 30 }, (_, index) => track(`jazz-${index}`)),
+      )
+      await engine.activate(
+        create({
+          shuffle: true,
+          repeatAll: false,
+          sources: [{ kind: 'sonos_playlist', ref: 'SQ:1', label: 'Jazz' }],
+        }),
+      )
+      await settle()
+
+      expect(driver.calls.some((call) => call.method === 'seekToTrack')).toBe(false)
+    })
+
+    it('re-asserts shuffle once the whole queue is in', async () => {
+      // The order Sonos generated covered only the opening source.
+      driver.setBrowseResult('SQ:1', [track('jazz-1')])
+      driver.setBrowseResult('SQ:2', [track('rock-1'), track('rock-2')])
+      await engine.activate(
+        create({
+          sources: [
+            { kind: 'sonos_playlist', ref: 'SQ:1', label: 'Jazz' },
+            { kind: 'sonos_playlist', ref: 'SQ:2', label: 'Rock' },
+          ],
+        }),
+      )
+      await settle()
+
+      const modeCalls = driver.calls.filter((call) => call.method === 'setPlayMode')
+      expect(modeCalls.length).toBeGreaterThan(1)
+      expect(modeCalls.at(-1)?.args[1]).toBe('SHUFFLE')
     })
 
     it('leaves the playing track alone when deduping', async () => {

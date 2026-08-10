@@ -140,16 +140,13 @@ export interface SonosDriver {
    */
   removeTrackFromQueue(zoneId: string, position: number): Promise<void>
   /**
-   * Move a run of tracks so it sits immediately before `insertBefore`.
+   * Jump to a 1-based position in the queue.
    *
-   * Positions are 1-based, and everything between the two points shifts to
-   * make room — so a caller doing many of these has to track where things
-   * ended up.
+   * Under shuffle this indexes the *shuffled* order Sonos is playing, not the
+   * order the tracks were added in — which is what makes it usable for picking
+   * a random starting point.
    */
-  reorderQueue(
-    zoneId: string,
-    move: { from: number; count: number; insertBefore: number },
-  ): Promise<void>
+  seekToTrack(zoneId: string, position: number): Promise<void>
   /**
    * Enqueue in order. Implementations batch to respect the SOAP payload limit.
    *

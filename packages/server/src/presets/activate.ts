@@ -39,9 +39,6 @@ const CONTAINER_ENQUEUE_TIMEOUT_MS = 5 * 60 * 1000
  */
 const FAST_START_MAX_TRACKS = 100
 
-/** Moves between liveness checks while shuffling; each is a round trip. */
-const SHUFFLE_LIVENESS_INTERVAL = 50
-
 export type ActivationDeps = {
   db: Db
   driver: SonosDriver
@@ -225,8 +222,16 @@ export class ActivationEngine {
     const ordered = flags.shuffle ? this.orderForFastStart(playable) : playable
     const [head, ...tail] = ordered
     await this.enqueueSource(coordinator.zoneId, head!)
+
     await this.deps.driver.setPlayMode(coordinator.zoneId, playModeFor(flags))
     await this.deps.driver.setTransportToQueue(coordinator.zoneId)
+    // Otherwise every activation opens on the same song: Sonos always begins at
+    // shuffled position 1 and keeps the same track there.
+    //
+    // Only when the queue loops, though. Starting two thirds of the way into a
+    // queue that stops at the end means the first two thirds never play at all
+    // — a worse trade than a predictable opening track.
+    if (flags.shuffle && flags.repeatAll) await this.startSomewhereRandom(coordinator.zoneId)
     await this.deps.driver.play(coordinator.zoneId)
 
     const head_queue = await this.deps.driver.getQueue(coordinator.zoneId)
@@ -475,7 +480,9 @@ export class ActivationEngine {
     if (options.dedupe) await this.dedupeQueue(zoneId)
     if (!this.isLive(activationId)) return
 
-    if (options.shuffle) await this.shuffleQueue(activationId, zoneId)
+    // Re-asserted now the queue is complete, so the shuffled order spans all of
+    // it rather than the opening source it was generated over.
+    await this.deps.driver.setPlayMode(zoneId, playModeFor(options))
 
     const queue = await this.deps.driver.getQueue(zoneId)
     if (!this.isLive(activationId)) return
@@ -491,52 +498,25 @@ export class ActivationEngine {
   }
 
   /**
-   * Shuffle the queue itself, because Sonos will not.
+   * Start the queue somewhere random.
    *
-   * `SetPlayMode(SHUFFLE)` is accepted and reads back as SHUFFLE, and then has
-   * no effect whatsoever: verified against the household, playback starts at
-   * track 1 and advances 1, 2, 3 through a 2,082-track queue, whether the mode
-   * is set before or after pointing the transport at the queue, and whether or
-   * not playback is restarted from a stop. So the interleaving has to be real.
+   * Sonos' shuffle is real — `Browse Q:0` returns a shuffled order once the
+   * mode is set, re-randomised each time it is set — but pressing play always
+   * begins at shuffled position 1, and Sonos pins the same track there. Five
+   * consecutive starts on a 2,082-track queue opened on the same song every
+   * time. Seeking to a random position indexes the shuffled order, so this is
+   * the missing half of what the app's shuffle button does.
    *
-   * A Fisher-Yates built out of single-track moves, running back to front: the
-   * shuffled portion grows at the tail, so each move draws from the untouched
-   * prefix and the arithmetic stays simple. Roughly 7ms a move regardless of
-   * how many tracks are moved, so a couple of thousand tracks is about fifteen
-   * seconds — done behind playback, and only over the part of the queue that
-   * has not been played yet, so nothing already heard comes back round.
+   * Only sound when the queue repeats: everything before the starting point is
+   * reached by looping round, and without repeat it is simply never played.
    */
-  private async shuffleQueue(activationId: string, zoneId: string): Promise<void> {
+  private async startSomewhereRandom(zoneId: string): Promise<void> {
     const queue = await this.deps.driver.getQueue(zoneId)
-    const group = this.deps.driver
-      .snapshot()
-      .groups.find((candidate) => candidate.coordinatorZoneId === zoneId)
-    const playingIdentity = trackIdentity(group?.currentTrackUri)
-    const playingIndex = queue.findIndex((item) => trackIdentity(item.uri) === playingIdentity)
-
-    // Everything after the current track is fair game; what has already played
-    // stays where it is.
-    const first = (playingIndex === -1 ? 0 : playingIndex + 1) + 1
-    if (queue.length - first < 1) return
-
-    const started = Date.now()
-    let moves = 0
-    for (let last = queue.length; last > first; last -= 1) {
-      if (moves % SHUFFLE_LIVENESS_INTERVAL === 0 && !this.isLive(activationId)) {
-        this.logger.info({ activationId, moves }, 'shuffle abandoned; activation is no longer live')
-        return
-      }
-      const pick = first + Math.floor(this.random() * (last - first + 1))
-      if (pick === last) continue
-      await this.deps.driver
-        .reorderQueue(zoneId, { from: pick, count: 1, insertBefore: last + 1 })
-        .catch((err) => this.logger.debug({ err, pick, last }, 'reorder failed'))
-      moves += 1
-    }
-    this.logger.info(
-      { moves, tracks: queue.length - first + 1, elapsedMs: Date.now() - started },
-      'shuffled queue',
-    )
+    if (queue.length < 2) return
+    const position = 1 + Math.floor(this.random() * queue.length)
+    await this.deps.driver.seekToTrack(zoneId, position).catch((err) => {
+      this.logger.debug({ err, position }, 'could not pick a random starting track')
+    })
   }
 
   /**
@@ -660,15 +640,12 @@ type EnqueueableSource = {
 }
 
 /**
- * Only repeat. Shuffle is deliberately absent.
- *
- * Sonos accepts `SHUFFLE` and reads it back, then plays the queue in order
- * anyway — verified against the household on a 2,082-track queue. Setting it
- * would claim something untrue about how the queue is being played, so the
- * interleaving is done by reordering the queue and the mode says only whether
- * to loop.
+ * Sonos does the interleaving, so shuffle is a play mode rather than something
+ * baked into queue order. `SHUFFLE` means shuffle *and* repeat-all, which is
+ * why the no-repeat variant is a separate mode rather than a second flag.
  */
-function playModeFor(flags: { repeatAll: boolean }): DriverPlayMode {
+function playModeFor(flags: { shuffle: boolean; repeatAll: boolean }): DriverPlayMode {
+  if (flags.shuffle) return flags.repeatAll ? 'SHUFFLE' : 'SHUFFLE_NOREPEAT'
   return flags.repeatAll ? 'REPEAT_ALL' : 'NORMAL'
 }
 
