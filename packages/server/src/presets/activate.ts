@@ -345,6 +345,13 @@ export class ActivationEngine {
     return resolved
   }
 
+  /**
+   * This warning is for the *commands* failing, not for being unable to confirm
+   * they worked. Waiting for topology to settle is best-effort inside the
+   * driver, deliberately: a snapshot that cannot be read says nothing about
+   * whether the speakers grouped, and reporting a failure on that basis told
+   * people their preset was broken when it was playing correctly.
+   */
   private async applyGrouping(coordinatorZoneId: string, zoneIds: string[], warnings: string[]) {
     const others = zoneIds.filter((zoneId) => zoneId !== coordinatorZoneId)
     try {

@@ -125,7 +125,12 @@ export class RealSonosDriver implements SonosDriver {
     await this.refreshTopology()
     this.startTimers()
 
-    this.logger.info({ zones: this.zoneGroups.length }, 'sonos ready')
+    // `groups`, not `zones` — this counts zone *groups*, and calling it zones
+    // reads as a discovery failure whenever anything is grouped.
+    this.logger.info(
+      { groups: this.zoneGroups.length, devices: this.manager?.Devices.length ?? 0 },
+      'sonos ready',
+    )
   }
 
   async stop(): Promise<void> {
@@ -565,7 +570,19 @@ export class RealSonosDriver implements SonosDriver {
   ): Promise<void> {
     const deadline = Date.now() + TOPOLOGY_SETTLE_TIMEOUT_MS
     while (Date.now() < deadline) {
-      await this.refreshTopology()
+      try {
+        await this.refreshTopology()
+      } catch (err) {
+        // A failed read means "not settled yet", never "the grouping failed".
+        //
+        // Mid-regroup, Sonos briefly reports a group whose coordinator has
+        // already left it, and the library rejects the entire snapshot for that
+        // one group — `Error parsing ZoneGroup`, thrown from inside a `.map`.
+        // The moment we are polling through is exactly when that happens, so
+        // letting it escape turned a join that had worked perfectly well into
+        // "Speakers could not be grouped as configured".
+        this.logger.debug({ err, ...context }, 'topology unreadable while settling')
+      }
       if (predicate()) return
       await new Promise((resolve) => setTimeout(resolve, 250))
     }
