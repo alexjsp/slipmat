@@ -247,6 +247,106 @@ describe('ActivationEngine', () => {
     expect(driver.queueOf(KITCHEN)).toEqual(queue)
   })
 
+  describe('streaming sources in a small house', () => {
+    // A two-speaker household with both speakers busy: there is nothing idle to
+    // borrow, which used to degrade the preset to "container only".
+    const buildTwoSpeakerHouse = async () => {
+      const smallDriver = new FakeSonosDriver({
+        zones: [
+          { id: 'RINCON_A01400', name: 'Kitchen' },
+          { id: 'RINCON_B01400', name: 'Living Room' },
+        ],
+      })
+      await smallDriver.start()
+      smallDriver.setPlaying('RINCON_A01400', 'x-rincon-queue:a#0', 'busy-a')
+      smallDriver.setPlaying('RINCON_B01400', 'x-rincon-queue:b#0', 'busy-b')
+
+      const containerUri =
+        'x-rincon-cpcontainer:1006206cspotify%3aplaylist%3a37i9dQZF1DXcBWIGoYBM5M?sid=9&flags=8300&sn=7'
+      smallDriver.setContainerContents(containerUri, [
+        track('stream-1'),
+        track('stream-2'),
+        track('stream-3'),
+      ])
+
+      const db2 = openDatabase({ inMemory: true })
+      const store2 = new SystemStateStore(smallDriver)
+      const cache2 = new SourceCache(
+        db2,
+        new SourceResolver({ driver: smallDriver, logger, allowScratchQueueExpansion: true }),
+        logger,
+      )
+      const repo2 = new PresetRepository(db2)
+      const engine2 = new ActivationEngine({
+        db: db2,
+        driver: smallDriver,
+        store: store2,
+        cache: cache2,
+        logger,
+        repo: repo2,
+        timeZone: 'UTC',
+      })
+      return { driver: smallDriver, repo: repo2, engine: engine2 }
+    }
+
+    it('expands on the preset coordinator when no speaker is free to borrow', async () => {
+      const house = await buildTwoSpeakerHouse()
+      const preset = house.repo.create(
+        {
+          ...presetInput(),
+          zones: [{ zoneId: 'RINCON_A01400', volume: 20, isCoordinator: true }],
+          sources: [
+            {
+              kind: 'service_url',
+              ref: 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M',
+              label: 'Streaming',
+            },
+          ],
+        },
+        new Map([
+          ['RINCON_A01400', 'Kitchen'],
+          ['RINCON_B01400', 'Living Room'],
+        ]),
+      )
+
+      const result = await house.engine.activate(preset)
+
+      // Previously this degraded to container-only with a warning.
+      expect(result.warnings).toEqual([])
+      // Sorted: the queue is shuffled, so only its contents are meaningful.
+      expect([...house.driver.queueOf('RINCON_A01400')].sort()).toEqual([
+        'stream-1',
+        'stream-2',
+        'stream-3',
+      ])
+    })
+
+    it('never touches the other speaker to do it', async () => {
+      const house = await buildTwoSpeakerHouse()
+      const preset = house.repo.create(
+        {
+          ...presetInput(),
+          zones: [{ zoneId: 'RINCON_A01400', volume: 20, isCoordinator: true }],
+          sources: [
+            {
+              kind: 'service_url',
+              ref: 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M',
+              label: 'Streaming',
+            },
+          ],
+        },
+        new Map([['RINCON_A01400', 'Kitchen']]),
+      )
+
+      await house.engine.activate(preset)
+
+      const touchedOther = house.driver.calls.some(
+        (call) => call.method === 'clearQueue' && call.args[0] === 'RINCON_B01400',
+      )
+      expect(touchedOther).toBe(false)
+    })
+  })
+
   describe('conditional rules', () => {
     const buildEngineAt = (now: Date) => {
       const db2 = openDatabase({ inMemory: true })

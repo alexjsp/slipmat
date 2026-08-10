@@ -68,6 +68,8 @@ export const resolvedSources = sqliteTable('resolved_sources', {
   /** Structured metadata for pasted service URLs; see driver.addUrisToQueue. */
   containerMetadataObjectJson: text('container_metadata_object_json'),
   warning: text('warning'),
+  /** Whether resolving borrowed a speaker; see SourceCache. */
+  expensive: integer('expensive', { mode: 'boolean' }).notNull().default(false),
   resolvedAt: text('resolved_at').notNull().default(now),
 })
 

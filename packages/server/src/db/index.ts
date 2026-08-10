@@ -63,12 +63,14 @@ const DDL = [
     container_metadata TEXT,
     container_metadata_object_json TEXT,
     warning TEXT,
+    expensive INTEGER NOT NULL DEFAULT 0,
     resolved_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   )`,
 
   // Added after the table shipped; SQLite has no ADD COLUMN IF NOT EXISTS, so
   // the duplicate-column error is expected and ignored on an up-to-date db.
   `ALTER TABLE resolved_sources ADD COLUMN container_metadata_object_json TEXT`,
+  `ALTER TABLE resolved_sources ADD COLUMN expensive INTEGER NOT NULL DEFAULT 0`,
 
   `CREATE TABLE IF NOT EXISTS activations (
     id TEXT PRIMARY KEY,

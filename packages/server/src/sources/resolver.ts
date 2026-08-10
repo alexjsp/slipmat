@@ -27,6 +27,12 @@ export type ResolvedSource = {
    * form because Sonos rejects hand-stringified DIDL for these containers.
    */
   containerMetadataObject?: unknown
+  /**
+   * True when resolving this borrowed a speaker's queue. Cheap sources are a
+   * plain ContentDirectory browse and can safely be re-resolved on every
+   * activation; expensive ones cannot, so they rely on the cache.
+   */
+  expensive: boolean
   warning: string | null
 }
 
@@ -34,6 +40,18 @@ export type SourceInput = {
   kind: SourceKind
   ref: string
   label?: string
+}
+
+export type ResolveOptions = {
+  /**
+   * Zone to use for scratch-queue expansion, overriding the idle-zone search.
+   *
+   * During activation this is the preset's own coordinator: its queue is about
+   * to be cleared and replaced regardless, so expanding there costs nothing and
+   * disturbs nobody. That also makes expansion work in a house with only a
+   * couple of speakers, where there may be no idle zone to borrow at all.
+   */
+  expansionZone?: { zoneId: string; queueIsExpendable: boolean }
 }
 
 /** Where the browse tree starts for each kind of saved content. */
@@ -76,15 +94,15 @@ export class SourceResolver {
     this.allowExpansion = options.allowScratchQueueExpansion ?? false
   }
 
-  async resolve(source: SourceInput): Promise<ResolvedSource> {
+  async resolve(source: SourceInput, options: ResolveOptions = {}): Promise<ResolvedSource> {
     switch (source.kind) {
       case 'sonos_playlist':
       case 'library_container':
         return this.resolveContainerObject(source)
       case 'sonos_favorite':
-        return this.resolveFavorite(source)
+        return this.resolveFavorite(source, options)
       case 'service_url':
-        return this.resolveServiceUrl(source)
+        return this.resolveServiceUrl(source, options)
       case 'raw_uri':
         return this.singleUri(source.ref, null, source.label ?? source.ref)
     }
@@ -105,6 +123,7 @@ export class SourceResolver {
         tracks: [],
         containerUri: null,
         containerMetadata: null,
+        expensive: false,
         warning: 'This container has no playable tracks.',
       }
     }
@@ -115,6 +134,7 @@ export class SourceResolver {
       tracks,
       containerUri: null,
       containerMetadata: null,
+      expensive: false,
       warning: null,
     }
   }
@@ -123,7 +143,10 @@ export class SourceResolver {
    * A favourite is a pointer. It can be a radio stream (a solo source), a
    * container (expandable), or a single track.
    */
-  private async resolveFavorite(source: SourceInput): Promise<ResolvedSource> {
+  private async resolveFavorite(
+    source: SourceInput,
+    options: ResolveOptions = {},
+  ): Promise<ResolvedSource> {
     const favorites = await this.browseAll(ROOT_OBJECT_IDS.favorites)
     const favorite = favorites.find((item) => item.id === source.ref)
     if (!favorite) throw new Error(`Favourite ${source.ref} no longer exists`)
@@ -142,12 +165,13 @@ export class SourceResolver {
         tracks: [],
         containerUri: uri,
         containerMetadata: favorite.metadata,
+        expensive: false,
         warning: null,
       }
     }
 
     if (uri.startsWith('x-rincon-cpcontainer:') || favorite.isContainer) {
-      return this.expandContainer(uri, favorite.metadata, label)
+      return this.expandContainer(uri, favorite.metadata, label, undefined, undefined, options)
     }
 
     return this.singleUri(uri, favorite.metadata, label)
@@ -157,7 +181,10 @@ export class SourceResolver {
    * A pasted share URL. `MetaDataHelper` already knows the container URI shapes
    * Sonos expects per service, so we lean on that rather than reinventing them.
    */
-  private async resolveServiceUrl(source: SourceInput): Promise<ResolvedSource> {
+  private async resolveServiceUrl(
+    source: SourceInput,
+    options: ResolveOptions = {},
+  ): Promise<ResolvedSource> {
     const ref = parseServiceUrl(source.ref)
     const guessed = MetaDataHelper.GuessTrack(ref.uri)
 
@@ -180,6 +207,7 @@ export class SourceResolver {
       label,
       guessed,
       serviceDisplayName(ref.service),
+      options,
     )
   }
 
@@ -190,6 +218,7 @@ export class SourceResolver {
       tracks: isRadioStream(uri) ? [] : [{ uri, metadata, title: null, artist: null }],
       containerUri: isRadioStream(uri) ? uri : null,
       containerMetadata: isRadioStream(uri) ? metadata : null,
+      expensive: false,
       warning: null,
     }
   }
@@ -209,6 +238,7 @@ export class SourceResolver {
     label: string,
     containerMetadataObject?: unknown,
     serviceName?: string,
+    options: ResolveOptions = {},
   ): Promise<ResolvedSource> {
     const containerOnly = (warning: string): ResolvedSource => ({
       mode: 'container_only',
@@ -217,6 +247,7 @@ export class SourceResolver {
       containerUri,
       containerMetadata,
       containerMetadataObject,
+      expensive: true,
       warning,
     })
 
@@ -226,7 +257,8 @@ export class SourceResolver {
       )
     }
 
-    const zoneId = await this.pickUtilityZone()
+    const override = options.expansionZone
+    const zoneId = override?.zoneId ?? (await this.pickUtilityZone())
     if (!zoneId) {
       return containerOnly(
         'No idle speaker was free to expand this source, so it can only be played whole.',
@@ -235,9 +267,15 @@ export class SourceResolver {
 
     let savedQueueId: string | undefined
     try {
-      const existing = await this.driver.getQueue(zoneId)
-      if (existing.length > 0) {
-        savedQueueId = await this.driver.saveQueue(zoneId, `Domovoi restore ${Date.now()}`)
+      // When the caller says the queue is expendable — activation, where this
+      // zone is about to be cleared and refilled anyway — skip the snapshot
+      // entirely. Saving and restoring a queue we're about to destroy is pure
+      // latency in front of a button press.
+      if (!override?.queueIsExpendable) {
+        const existing = await this.driver.getQueue(zoneId)
+        if (existing.length > 0) {
+          savedQueueId = await this.driver.saveQueue(zoneId, `Domovoi restore ${Date.now()}`)
+        }
       }
 
       await this.driver.clearQueue(zoneId)
@@ -265,6 +303,7 @@ export class SourceResolver {
         containerUri,
         containerMetadata,
         containerMetadataObject,
+        expensive: true,
         warning: null,
       }
     } catch (err) {
@@ -278,8 +317,9 @@ export class SourceResolver {
         'Sonos would not expand this source into tracks, so it can only be played whole.',
       )
     } finally {
-      // Always put the borrowed speaker back, even if expansion threw.
-      await this.restoreQueue(zoneId, savedQueueId)
+      // Always put a borrowed speaker back, even if expansion threw. An
+      // expendable queue is the caller's to deal with.
+      if (!override?.queueIsExpendable) await this.restoreQueue(zoneId, savedQueueId)
     }
   }
 

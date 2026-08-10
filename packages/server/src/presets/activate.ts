@@ -7,7 +7,7 @@ import type { Logger } from '../logger.js'
 import type { SonosDriver } from '../sonos/driver.js'
 import { classifyPlaybackKind, isProtectedFromPauseAll } from '../sonos/uris.js'
 import type { SourceCache } from '../sources/cache.js'
-import type { ResolvedTrack } from '../sources/resolver.js'
+import type { ResolvedTrack, ResolveOptions } from '../sources/resolver.js'
 import type { SystemStateStore } from '../state/store.js'
 import type { PresetRepository } from './repository.js'
 import { pickCoordinator } from './repository.js'
@@ -110,7 +110,12 @@ export class ActivationEngine {
       pauseOthers: effective.pauseOthers,
     }
 
-    const resolved = await this.resolveSources(effective.sources, warnings)
+    // The coordinator's queue is about to be cleared and refilled, so it is
+    // the right zone to expand streaming containers on: no other speaker is
+    // disturbed, and it works in a house with nothing idle to borrow.
+    const resolved = await this.resolveSources(effective.sources, warnings, {
+      expansionZone: { zoneId: coordinator.zoneId, queueIsExpendable: true },
+    })
     const streamSource = resolved.find((source) => source.mode === 'stream')
     const containerOnly = resolved.filter((source) => source.mode === 'container_only')
 
@@ -273,12 +278,16 @@ export class ActivationEngine {
   private async resolveSources(
     sources: { kind: SourceKind; ref: string; label: string }[],
     warnings: string[],
+    options: ResolveOptions = {},
   ) {
     const resolved = []
     for (const source of sources) {
       try {
         resolved.push(
-          await this.deps.cache.get({ kind: source.kind, ref: source.ref, label: source.label }),
+          await this.deps.cache.get(
+            { kind: source.kind, ref: source.ref, label: source.label },
+            options,
+          ),
         )
       } catch (err) {
         this.logger.warn({ err, ref: source.ref }, 'source failed to resolve')

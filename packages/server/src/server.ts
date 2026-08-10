@@ -21,6 +21,7 @@ import { SettingsStore } from './settings.js'
 import { createDriver } from './sonos/create-driver.js'
 import type { SonosDriver } from './sonos/driver.js'
 import { SourceCache } from './sources/cache.js'
+import { SourceRefresher } from './sources/refresher.js'
 import { SourceResolver } from './sources/resolver.js'
 import { SystemStateStore } from './state/store.js'
 
@@ -96,6 +97,12 @@ export async function buildServer({
   // Reality can drift while we're not looking (someone pauses in the Sonos app,
   // a speaker reboots), so re-derive active state whenever anything changes.
   store.on('change', () => engine.reconcile())
+
+  // Streaming playlists change under us — a weekly mix would otherwise keep
+  // serving last week's tracks until something happened to refresh it.
+  const refresher = new SourceRefresher({ repo, cache, logger })
+  refresher.start()
+  app.addHook('onClose', async () => refresher.stop())
 
   // Off unless DOMOVOI_HOMEKIT=1, and the HAP library is only imported when it
   // is — so with the feature off nothing is advertised over mDNS at all.
