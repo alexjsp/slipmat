@@ -29,6 +29,16 @@ const SETTLE_GRACE_MS = 10_000
  */
 const CONTAINER_ENQUEUE_TIMEOUT_MS = 5 * 60 * 1000
 
+/**
+ * Largest source playback is willing to wait on.
+ *
+ * Sonos expands a container before acknowledging the enqueue, at roughly a
+ * second per twenty-five tracks, so a hundred tracks is about four seconds —
+ * the outer edge of what a button press can absorb. Anything at or under this
+ * is a candidate to open with; the rest fill in behind.
+ */
+const FAST_START_MAX_TRACKS = 100
+
 export type ActivationDeps = {
   db: Db
   driver: SonosDriver
@@ -40,6 +50,8 @@ export type ActivationDeps = {
   timeZone: string
   /** Injectable so rule behaviour can be tested without waiting for Thursday. */
   now?: () => Date
+  /** Injectable so the random choice of opening source can be pinned in tests. */
+  random?: () => number
 }
 
 export class ActivationEngine {
@@ -50,6 +62,10 @@ export class ActivationEngine {
 
   private now(): Date {
     return (this.deps.now ?? (() => new Date()))()
+  }
+
+  private random(): number {
+    return (this.deps.random ?? Math.random)()
   }
 
   /** The live activation for a preset, if any. */
@@ -199,11 +215,11 @@ export class ActivationEngine {
     await this.deps.driver.clearQueue(coordinator.zoneId)
     // Sonos answers a container enqueue only once it has expanded the whole
     // thing — 1s for a 25-track mix, 44s for a 2,000-track playlist — so which
-    // source goes first decides how long the room stays silent. When shuffle is
-    // on, queue order has no effect on what gets played, so the smallest known
-    // source goes first purely to start the music sooner. With shuffle off the
-    // preset's order *is* the playback order and must be left alone.
-    const ordered = flags.shuffle ? [...playable].sort(bySmallestKnownFirst) : playable
+    // source goes first decides how long the room stays silent. Under shuffle
+    // queue order has no effect on what gets played, so one of the small
+    // sources is moved to the front. With shuffle off the preset's order *is*
+    // the playback order and must be left alone.
+    const ordered = flags.shuffle ? this.orderForFastStart(playable) : playable
     const [head, ...tail] = ordered
     await this.enqueueSource(coordinator.zoneId, head!)
     await this.deps.driver.setPlayMode(
@@ -365,6 +381,33 @@ export class ActivationEngine {
       if (isProtectedFromPauseAll(kind)) continue
       await this.deps.driver.pause(group.coordinatorZoneId).catch(() => undefined)
     }
+  }
+
+  /**
+   * Choose which source playback waits on, and put it first.
+   *
+   * Any source small enough to enqueue quickly will do, so the choice is
+   * random among them rather than simply the smallest. Always picking the
+   * smallest is predictable in a way that shows: a preset holding one album and
+   * three medium playlists would open on that same album every single day, even
+   * though the point of shuffle is that it shouldn't.
+   *
+   * If nothing is small enough — every source is huge, or none has a known
+   * count — fall back to the smallest known, since waiting on a 200-track
+   * playlist still beats waiting on a 2,000-track one.
+   */
+  private orderForFastStart(sources: EnqueueableSource[]): EnqueueableSource[] {
+    if (sources.length < 2) return sources
+
+    const quick = sources.filter(
+      (source) => source.tracks.length > 0 && source.tracks.length <= FAST_START_MAX_TRACKS,
+    )
+    const head = quick.length
+      ? quick[Math.floor(this.random() * quick.length)]
+      : [...sources].sort(bySmallestKnownFirst)[0]
+    if (!head) return sources
+
+    return [head, ...sources.filter((source) => source !== head)]
   }
 
   /**
@@ -581,11 +624,8 @@ function playModeFor(flags: { shuffle: boolean; repeatAll: boolean }): DriverPla
 /**
  * Smallest known track count first, unknown counts last.
  *
- * Only used when shuffle is on, where queue order does not affect playback —
- * it exists so the first container Sonos has to expand is a small one, which
- * is the difference between music in a second and music in three quarters of a
- * minute. A source with no cached count could be either, so it does not get to
- * hold up the start.
+ * The fallback for when no source is small enough to be a good opener. A source
+ * with no cached count could be either, so it does not get to hold up the start.
  */
 function bySmallestKnownFirst(a: EnqueueableSource, b: EnqueueableSource): number {
   const sizeOf = (source: EnqueueableSource) =>

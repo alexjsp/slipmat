@@ -497,10 +497,9 @@ describe('ActivationEngine', () => {
       expect(driver.queueOf(KITCHEN)).toHaveLength(2000)
     })
 
-    it('starts with the smallest source so the room is not silent for a minute', async () => {
+    it('opens on a small source rather than the one that takes 40s to expand', async () => {
       // Sonos answers a container enqueue only after expanding it, so listing a
-      // huge playlist first would mean 44s of silence. Order is irrelevant
-      // under shuffle, so the small source is queued first deliberately.
+      // huge playlist first would mean 40-odd seconds of silence.
       driver.setBrowseResult(
         'SQ:1',
         Array.from({ length: 800 }, (_, index) => track(`jazz-${index}`)),
@@ -520,6 +519,33 @@ describe('ActivationEngine', () => {
       const enqueues = driver.calls.filter((call) => call.method === 'addUrisToQueue')
       expect(enqueues[0]?.args[1]).toBe(2)
       expect(driver.queueOf(KITCHEN)).toHaveLength(802)
+    })
+
+    it('varies which small source opens, rather than always the smallest', async () => {
+      // Always choosing the smallest is predictable in a way that shows: an
+      // album among medium playlists would open every single day.
+      driver.setBrowseResult('SQ:1', [track('album-1'), track('album-2')])
+      driver.setBrowseResult(
+        'SQ:2',
+        Array.from({ length: 40 }, (_, index) => track(`mix-${index}`)),
+      )
+      const sources = [
+        { kind: 'sonos_playlist' as const, ref: 'SQ:1', label: 'Album' },
+        { kind: 'sonos_playlist' as const, ref: 'SQ:2', label: 'Mix' },
+      ]
+      const engineWith = (random: () => number) =>
+        new ActivationEngine({ db, driver, store, cache, logger, repo, timeZone: 'UTC', random })
+
+      // Both are small, so both are candidates and the choice is the random one.
+      await engineWith(() => 0).activate(create({ name: 'First', sources }))
+      const firstOpener = driver.calls.filter((c) => c.method === 'addUrisToQueue')[0]?.args[1]
+
+      driver.calls.length = 0
+      await engineWith(() => 0.99).activate(create({ name: 'Second', sources }))
+      const secondOpener = driver.calls.filter((c) => c.method === 'addUrisToQueue')[0]?.args[1]
+
+      expect(firstOpener).toBe(2)
+      expect(secondOpener).toBe(40)
     })
 
     it('leaves the playing track alone when deduping', async () => {
