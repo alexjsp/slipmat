@@ -87,14 +87,19 @@ const DDL = [
   )`,
   `CREATE INDEX IF NOT EXISTS activations_live ON activations (live, preset_id)`,
 
-  `CREATE TABLE IF NOT EXISTS triggers (
+  `CREATE TABLE IF NOT EXISTS preset_triggers (
     id TEXT PRIMARY KEY,
-    preset_id TEXT NOT NULL REFERENCES presets(id) ON DELETE CASCADE,
+    preset_id TEXT REFERENCES presets(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
     config_json TEXT NOT NULL DEFAULT '{}',
     enabled INTEGER NOT NULL DEFAULT 1,
+    last_fired_key TEXT,
+    last_fired_at TEXT,
+    last_skipped_reason TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   )`,
+  `CREATE INDEX IF NOT EXISTS preset_triggers_enabled ON preset_triggers (enabled)`,
 
   `CREATE TABLE IF NOT EXISTS preset_rules (
     id TEXT PRIMARY KEY,
@@ -121,6 +126,23 @@ export function openDatabase(options: { dataDir: string } | { inMemory: true }) 
   // WAL survives an unclean container stop far better than the default journal.
   if (!('inMemory' in options)) sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
+
+  // The original `triggers` table declared preset_id NOT NULL, which a
+  // system-wide trigger can't satisfy. Nothing ever wrote to it, so drop it —
+  // but only if it really is empty, rather than trusting that.
+  try {
+    const legacy = sqlite
+      .prepare("SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name='triggers'")
+      .get() as { count: number }
+    if (legacy.count > 0) {
+      const rows = sqlite.prepare('SELECT count(*) AS count FROM triggers').get() as {
+        count: number
+      }
+      if (rows.count === 0) sqlite.exec('DROP TABLE triggers')
+    }
+  } catch {
+    // Leaving it in place is harmless; nothing reads it.
+  }
 
   for (const statement of DDL) {
     try {

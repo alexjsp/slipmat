@@ -41,6 +41,10 @@ export class ActivationEngine {
     this.logger = deps.logger.child({ component: 'activation' })
   }
 
+  private now(): Date {
+    return (this.deps.now ?? (() => new Date()))()
+  }
+
   /** The live activation for a preset, if any. */
   liveActivation(presetId: string) {
     return this.deps.db
@@ -93,7 +97,7 @@ export class ActivationEngine {
     // Rules are evaluated once, here — a preset started at 20:59 does not
     // mutate into the wind-down version at 21:00 while someone is listening.
     const rules = this.deps.repo.rulesFor(preset.id)
-    const clock = clockFrom((this.deps.now ?? (() => new Date()))(), this.deps.timeZone)
+    const clock = clockFrom(this.now(), this.deps.timeZone)
     const effective = evaluateRules(preset, rules, clock)
     if (effective.appliedRuleLabels.length > 0) {
       this.logger.info(
@@ -411,6 +415,10 @@ export class ActivationEngine {
         streamUri: input.streamUri,
         warningsJson: JSON.stringify(input.warnings),
         live: true,
+        // Stamped from the engine's clock rather than the database's, so
+        // everything that reasons about elapsed time — sleep timers especially —
+        // agrees on what "now" means.
+        startedAt: this.now().toISOString(),
       })
       .run()
   }

@@ -101,20 +101,28 @@ export const activations = sqliteTable(
 )
 
 /**
- * Present from day one so cron schedules can be added without a migration.
- * Nothing writes here yet.
+ * Schedules and event triggers.
+ *
+ * `presetId` is nullable because two kinds are system-wide rather than attached
+ * to a preset: a scheduled Pause All, and "the TV turning on pauses music".
  */
-export const triggers = sqliteTable('triggers', {
-  id: text('id').primaryKey(),
-  presetId: text('preset_id')
-    .notNull()
-    .references(() => presets.id, { onDelete: 'cascade' }),
-  kind: text('kind').notNull(),
-  /** Kind-specific JSON config, e.g. { cron: '30 7 * * 1-5', tz: 'Europe/London' }. */
-  configJson: text('config_json').notNull().default('{}'),
-  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
-  createdAt: text('created_at').notNull().default(now),
-})
+export const triggers = sqliteTable(
+  'preset_triggers',
+  {
+    id: text('id').primaryKey(),
+    presetId: text('preset_id').references(() => presets.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    label: text('label').notNull().default(''),
+    configJson: text('config_json').notNull().default('{}'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    /** Dedupe key of the last occurrence fired; see triggers/matching.ts. */
+    lastFiredKey: text('last_fired_key'),
+    lastFiredAt: text('last_fired_at'),
+    lastSkippedReason: text('last_skipped_reason'),
+    createdAt: text('created_at').notNull().default(now),
+  },
+  (table) => [index('preset_triggers_enabled').on(table.enabled)],
+)
 
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),

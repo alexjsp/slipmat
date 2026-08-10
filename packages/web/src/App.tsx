@@ -1,4 +1,4 @@
-import { ListMusic, Settings, Speaker, WifiOff } from 'lucide-react'
+import { CalendarClock, ListMusic, Settings, Speaker, WifiOff } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Route, Switch, useLocation } from 'wouter'
 import { PauseAllButton } from '@/components/pause-all-button'
@@ -6,6 +6,7 @@ import { useSystemState } from '@/lib/system-state'
 import { cn } from '@/lib/utils'
 import { NowPlayingPage } from '@/pages/now-playing'
 import { PresetsPage } from '@/pages/presets'
+import { SchedulesPage } from '@/pages/schedules'
 import { SettingsPage } from '@/pages/settings'
 
 export function App() {
@@ -67,12 +68,15 @@ export function App() {
         </div>
       </header>
 
-      <nav className="flex gap-1 px-4 pt-3">
+      <nav className="flex flex-wrap gap-1 px-4 pt-3">
         <NavLink href="/" current={location} icon={<Speaker className="size-4" />}>
           Now Playing
         </NavLink>
         <NavLink href="/presets" current={location} icon={<ListMusic className="size-4" />}>
           Presets
+        </NavLink>
+        <NavLink href="/schedules" current={location} icon={<CalendarClock className="size-4" />}>
+          Schedules
         </NavLink>
         <NavLink href="/settings" current={location} icon={<Settings className="size-4" />}>
           Settings
@@ -96,6 +100,9 @@ export function App() {
           <Switch>
             <Route path="/presets">
               <PresetsPage zones={state.zones} onError={onError} />
+            </Route>
+            <Route path="/schedules">
+              <SchedulesPage onError={onError} />
             </Route>
             <Route path="/settings">
               <SettingsPage />

@@ -16,6 +16,7 @@ import { registerPlaybackRoutes } from './routes/playback.js'
 import { registerPresetRoutes } from './routes/presets.js'
 import { registerSourceRoutes } from './routes/sources.js'
 import { registerSystemRoutes } from './routes/system.js'
+import { registerTriggerRoutes } from './routes/triggers.js'
 import { registerWebhookRoutes } from './routes/webhooks.js'
 import { SettingsStore } from './settings.js'
 import { createDriver } from './sonos/create-driver.js'
@@ -24,6 +25,8 @@ import { SourceCache } from './sources/cache.js'
 import { SourceRefresher } from './sources/refresher.js'
 import { SourceResolver } from './sources/resolver.js'
 import { SystemStateStore } from './state/store.js'
+import { TriggerRepository } from './triggers/repository.js'
+import { Scheduler } from './triggers/scheduler.js'
 
 export type BuildServerOptions = {
   config: Config
@@ -127,6 +130,21 @@ export async function buildServer({
     timeZone: config.timeZone,
   })
   await registerWebhookRoutes(app, { repo, engine, driver, store, settings })
+
+  const triggers = new TriggerRepository(db)
+  const scheduler = new Scheduler({
+    triggers,
+    presets: repo,
+    engine,
+    driver,
+    store,
+    logger,
+    timeZone: config.timeZone,
+  })
+  scheduler.start()
+  app.addHook('onClose', async () => scheduler.stop())
+
+  await registerTriggerRoutes(app, { triggers, scheduler, timeZone: config.timeZone })
 
   app.get('/api/homekit', async () => ({
     enabled: config.homekit.enabled,
