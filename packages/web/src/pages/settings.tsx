@@ -4,19 +4,10 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-
-type HomeKitInfo = {
-  enabled: boolean
-  running: boolean
-  pincode: string | null
-  setupUri: string | null
-}
+import { useHomeKit } from '@/lib/use-homekit'
 
 export function SettingsPage() {
-  const homekit = useQuery({
-    queryKey: ['homekit'],
-    queryFn: async () => (await fetch('/api/homekit')).json() as Promise<HomeKitInfo>,
-  })
+  const homekit = useHomeKit()
   const pauseAll = useQuery({
     queryKey: ['pause-all-token'],
     queryFn: async () => (await fetch('/api/pause-all/token')).json() as Promise<{ token: string }>,

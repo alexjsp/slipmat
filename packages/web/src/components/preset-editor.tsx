@@ -17,6 +17,7 @@ import {
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { usePresetMutations, webhookUrl } from '@/lib/presets'
+import { useHomeKit } from '@/lib/use-homekit'
 import { cn } from '@/lib/utils'
 
 type Draft = PresetInput
@@ -76,6 +77,7 @@ export function PresetEditor({
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const mutations = usePresetMutations()
+  const homekit = useHomeKit()
 
   // Re-seed whenever a different preset is opened.
   useEffect(() => {
@@ -277,16 +279,21 @@ export function PresetEditor({
               <ToggleRow
                 id="crossfade"
                 label="Crossfade"
+                description="Enables Sonos' crossfade on the queue, blending each track into the next."
                 checked={draft.crossfade}
                 onChange={(value) => patch({ crossfade: value })}
               />
-              <ToggleRow
-                id="homekit"
-                label="Show in HomeKit"
-                description="Adds a switch, if the HomeKit bridge is enabled."
-                checked={draft.homekitEnabled}
-                onChange={(value) => patch({ homekitEnabled: value })}
-              />
+              {/* Offering this with the bridge switched off would promise a
+                  switch that never appears. */}
+              {homekit.data?.enabled && (
+                <ToggleRow
+                  id="homekit"
+                  label="Show in HomeKit"
+                  description="Adds a switch to the Home app for this preset."
+                  checked={draft.homekitEnabled}
+                  onChange={(value) => patch({ homekitEnabled: value })}
+                />
+              )}
             </section>
 
             {preset && (

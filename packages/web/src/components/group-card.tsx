@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { VolumeSlider } from '@/components/volume-slider'
 import { api } from '@/lib/api'
+import { useProgress } from '@/lib/use-progress'
 import { cn } from '@/lib/utils'
 
 const KIND_LABELS: Record<Group['playbackKind'], string> = {
@@ -49,10 +50,9 @@ export function GroupCard({
   const track = group.currentTrack
   const isPlaying = group.transportState === 'PLAYING'
   const duration = track?.durationSeconds ?? null
-  const progress =
-    duration && group.positionSeconds !== null
-      ? Math.min(100, (group.positionSeconds / duration) * 100)
-      : null
+  // Interpolated locally so the bar creeps forward between server polls.
+  const position = useProgress(group.positionSeconds, isPlaying, duration)
+  const progress = duration && position !== null ? Math.min(100, (position / duration) * 100) : null
 
   // TV and line-in aren't ours to drive — Sonos owns their transport.
   const transportDisabled = group.playbackKind === 'tv' || group.playbackKind === 'line-in'
@@ -118,10 +118,12 @@ export function GroupCard({
 
         {progress !== null && (
           <div className="flex items-center gap-2 px-4 pb-2 text-muted-foreground text-xs tabular-nums">
-            <span>{formatTime(group.positionSeconds ?? 0)}</span>
+            <span>{formatTime(position ?? 0)}</span>
             <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
               <div
-                className={cn('h-full rounded-full bg-primary transition-[width] duration-1000')}
+                className={cn(
+                  'h-full rounded-full bg-primary transition-[width] duration-500 ease-linear',
+                )}
                 style={{ width: `${progress}%` }}
               />
             </div>
