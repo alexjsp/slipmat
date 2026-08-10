@@ -1,4 +1,4 @@
-import { ListMusic, Settings, Speaker } from 'lucide-react'
+import { ListMusic, Settings, Speaker, WifiOff } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Route, Switch, useLocation } from 'wouter'
 import { PauseAllButton } from '@/components/pause-all-button'
@@ -31,19 +31,31 @@ export function App() {
     return () => clearTimeout(timer)
   }, [error])
 
+  // Held back briefly so a momentary blip — or the sub-second gap on first
+  // load — doesn't flash a scary message that resolves itself.
+  const [showDisconnected, setShowDisconnected] = useState(false)
+  useEffect(() => {
+    if (status === 'open') {
+      setShowDisconnected(false)
+      return
+    }
+    const timer = setTimeout(() => setShowDisconnected(true), 2500)
+    return () => clearTimeout(timer)
+  }, [status])
+
   return (
     <div className="mx-auto flex min-h-dvh max-w-2xl flex-col">
       <header className="flex items-center justify-between gap-4 px-4 pt-4">
         <h1 className="font-semibold text-xl tracking-tight">Domovoi</h1>
         <div className="flex items-center gap-3">
-          <span
-            className={cn(
-              'text-xs',
-              status === 'open' ? 'text-muted-foreground' : 'text-destructive',
-            )}
-          >
-            {status === 'open' ? 'live' : status === 'connecting' ? 'connecting…' : 'reconnecting…'}
-          </span>
+          {/* Working is the normal case and needs no announcing; only a problem
+              is worth the user's attention. */}
+          {showDisconnected && (
+            <span className="flex items-center gap-1.5 text-destructive text-xs">
+              <WifiOff className="size-3.5" />
+              Reconnecting…
+            </span>
+          )}
           <PauseAllButton
             disabled={!anythingPlaying}
             onDone={(skipped) =>
