@@ -101,6 +101,15 @@ export class ActivationEngine {
     }
 
     const warnings: string[] = []
+    // Phase timings, because "tap to first note" is the number that matters and
+    // it is made of a dozen sequential SOAP calls that are easy to misattribute.
+    const phases: Record<string, number> = {}
+    let mark = Date.now()
+    const took = (phase: string) => {
+      phases[phase] = Date.now() - mark
+      mark = Date.now()
+    }
+
     const snapshot = this.deps.driver.snapshot()
     const reachable = new Set(
       snapshot.zones.filter((zone) => !zone.unreachable).map((zone) => zone.id),
@@ -141,6 +150,7 @@ export class ActivationEngine {
     // Only far enough to hand each source to Sonos — no expansion, so nothing
     // borrows a speaker and a huge playlist costs nothing to prepare.
     const resolved = await this.resolveSources(effective.sources, warnings)
+    took('resolve')
     const streamSource = resolved.find((source) => source.mode === 'stream')
     const containerOnly = resolved.filter((source) => source.mode === 'container_only')
 
@@ -152,20 +162,41 @@ export class ActivationEngine {
 
     if (flags.pauseOthers) {
       await this.pauseOtherGroups(members.map((zone) => zone.zoneId))
+      took('pauseOthers')
     }
 
-    await this.applyGrouping(
-      coordinator.zoneId,
-      members.map((zone) => zone.zoneId),
-      warnings,
+    // Grouping is by far the slowest thing here — Sonos takes a couple of
+    // seconds to report the new topology, measured at 2.6s of a 4.3s activation
+    // — and none of it has to happen before the coordinator can play. Members
+    // join a group that is already playing perfectly well.
+    //
+    // They are muted first, though. A join resets a member's volume, so its
+    // real volume can only be set once the topology has settled, and a room
+    // that was loud last night must not get a couple of seconds at that volume
+    // on the way past.
+    const memberZoneIds = members.map((zone) => zone.zoneId)
+    const followers = memberZoneIds.filter((zoneId) => zoneId !== coordinator.zoneId)
+    await Promise.all(
+      followers.map((zoneId) =>
+        this.deps.driver.setMute(zoneId, true).catch(() => {
+          // Better to risk a moment of the old volume than to abandon the preset.
+        }),
+      ),
     )
-    await this.applyVolumes(
-      members.map((zone) => ({ ...zone, volume: volumeByZone.get(zone.zoneId) ?? zone.volume })),
-      warnings,
-    )
+    took('muteFollowers')
+
+    await this.applyGrouping(coordinator.zoneId, memberZoneIds, warnings, { settle: false })
+    took('group')
+
+    // The coordinator keeps its own volume through a join, so this one sticks.
+    const coordinatorVolume = volumeByZone.get(coordinator.zoneId) ?? coordinator.volume
+    await this.deps.driver.setVolume(coordinator.zoneId, coordinatorVolume).catch(() => undefined)
+    await this.deps.driver.setMute(coordinator.zoneId, false).catch(() => undefined)
+    took('volumes')
     await this.deps.driver.setCrossfade(coordinator.zoneId, flags.crossfade).catch(() => {
       warnings.push('Crossfade could not be set')
     })
+    took('crossfade')
 
     const activationId = randomUUID()
 
@@ -213,6 +244,7 @@ export class ActivationEngine {
     }
 
     await this.deps.driver.clearQueue(coordinator.zoneId)
+    took('clearQueue')
     // Sonos answers a container enqueue only once it has expanded the whole
     // thing — 1s for a 25-track mix, 44s for a 2,000-track playlist — so which
     // source goes first decides how long the room stays silent. Under shuffle
@@ -222,6 +254,7 @@ export class ActivationEngine {
     const ordered = flags.shuffle ? this.orderForFastStart(playable) : playable
     const [head, ...tail] = ordered
     await this.enqueueSource(coordinator.zoneId, head!)
+    took('enqueueHead')
 
     await this.deps.driver.setPlayMode(coordinator.zoneId, playModeFor(flags))
     await this.deps.driver.setTransportToQueue(coordinator.zoneId)
@@ -232,7 +265,17 @@ export class ActivationEngine {
     // queue that stops at the end means the first two thirds never play at all
     // — a worse trade than a predictable opening track.
     if (flags.shuffle && flags.repeatAll) await this.startSomewhereRandom(coordinator.zoneId)
+    took('startPoint')
     await this.deps.driver.play(coordinator.zoneId)
+    took('play')
+    this.logger.info(
+      {
+        presetId: preset.id,
+        phases,
+        toFirstNoteMs: Object.values(phases).reduce((a, b) => a + b, 0),
+      },
+      'activation timings',
+    )
 
     const head_queue = await this.deps.driver.getQueue(coordinator.zoneId)
     this.recordActivation({
@@ -244,6 +287,14 @@ export class ActivationEngine {
       streamUri: null,
       warnings,
     })
+
+    // Everything the followers need happens behind the music.
+    void this.settleFollowers(
+      coordinator.zoneId,
+      members
+        .filter((zone) => zone.zoneId !== coordinator.zoneId)
+        .map((zone) => ({ ...zone, volume: volumeByZone.get(zone.zoneId) ?? zone.volume })),
+    ).catch((err) => this.logger.warn({ err, presetId: preset.id }, 'failed to settle followers'))
 
     // The rest fills in behind playback.
     void this.fillQueue(activationId, coordinator.zoneId, tail, {
@@ -403,11 +454,49 @@ export class ActivationEngine {
    * whether the speakers grouped, and reporting a failure on that basis told
    * people their preset was broken when it was playing correctly.
    */
-  private async applyGrouping(coordinatorZoneId: string, zoneIds: string[], warnings: string[]) {
+  /**
+   * Bring the followers up once the group exists: correct volume, then sound.
+   *
+   * Runs behind playback, so the coordinator is already audible. Unmuting is in
+   * a `finally` because a member left muted is worse than one at the wrong
+   * volume — the first is silent all evening, the second is a slider away.
+   */
+  private async settleFollowers(
+    coordinatorZoneId: string,
+    followers: { zoneId: string; zoneName: string; volume: number }[],
+  ) {
+    if (followers.length === 0) return
+    try {
+      await this.deps.driver.awaitGrouping(
+        coordinatorZoneId,
+        followers.map((zone) => zone.zoneId),
+      )
+      await Promise.all(
+        followers.map((zone) =>
+          this.deps.driver.setVolume(zone.zoneId, zone.volume).catch((err) => {
+            this.logger.warn({ err, zoneId: zone.zoneId }, 'volume failed')
+          }),
+        ),
+      )
+    } finally {
+      await Promise.all(
+        followers.map((zone) =>
+          this.deps.driver.setMute(zone.zoneId, false).catch(() => undefined),
+        ),
+      )
+    }
+  }
+
+  private async applyGrouping(
+    coordinatorZoneId: string,
+    zoneIds: string[],
+    warnings: string[],
+    options: { settle?: boolean } = {},
+  ) {
     const others = zoneIds.filter((zoneId) => zoneId !== coordinatorZoneId)
     try {
       if (others.length > 0) {
-        await this.deps.driver.joinGroup(coordinatorZoneId, others)
+        await this.deps.driver.joinGroup(coordinatorZoneId, others, options)
       } else {
         await this.deps.driver.leaveGroup([coordinatorZoneId])
       }

@@ -519,17 +519,45 @@ export class RealSonosDriver implements SonosDriver {
     this.patch(zoneId, { muted })
   }
 
-  async joinGroup(coordinatorZoneId: string, zoneIds: string[]): Promise<void> {
-    // The coordinator must own its own group before anyone can follow it.
-    await this.leaveGroup([coordinatorZoneId])
-    for (const zoneId of zoneIds) {
-      if (zoneId === coordinatorZoneId) continue
-      await this.requireDevice(zoneId).AVTransportService.SetAVTransportURI({
-        InstanceID: 0,
-        CurrentURI: followUriFor(coordinatorZoneId),
-        CurrentURIMetaData: '',
-      })
-    }
+  async joinGroup(
+    coordinatorZoneId: string,
+    zoneIds: string[],
+    options: { settle?: boolean } = {},
+  ): Promise<void> {
+    // The coordinator must own its own group before anyone can follow it —
+    // but only the *command* has to precede the joins, not Sonos getting round
+    // to reporting it.
+    await this.leaveGroup([coordinatorZoneId], options)
+
+    // In parallel, and measured: telling one speaker to follow another takes
+    // ~2.6s, because Sonos does not answer until the speaker has actually torn
+    // down what it was doing and joined. Sequentially that is eight seconds for
+    // a four-room preset, all of it before a note plays.
+    const joins = Promise.all(
+      zoneIds
+        .filter((zoneId) => zoneId !== coordinatorZoneId)
+        .map((zoneId) =>
+          this.requireDevice(zoneId)
+            .AVTransportService.SetAVTransportURI({
+              InstanceID: 0,
+              CurrentURI: followUriFor(coordinatorZoneId),
+              CurrentURIMetaData: '',
+            })
+            .catch((err) => {
+              this.logger.warn({ err, zoneId }, 'speaker failed to join the group')
+            }),
+        ),
+    )
+
+    // Left in flight deliberately: the caller starts the music and uses
+    // `awaitGrouping` as the synchronisation point once it has.
+    if (options.settle === false) return
+
+    await joins
+    await this.awaitGrouping(coordinatorZoneId, zoneIds)
+  }
+
+  async awaitGrouping(coordinatorZoneId: string, zoneIds: string[]): Promise<void> {
     await this.waitForTopology(
       () => {
         const group = this.zoneGroups.find((g) => g.coordinator.uuid === coordinatorZoneId)
@@ -541,7 +569,7 @@ export class RealSonosDriver implements SonosDriver {
     )
   }
 
-  async leaveGroup(zoneIds: string[]): Promise<void> {
+  async leaveGroup(zoneIds: string[], options: { settle?: boolean } = {}): Promise<void> {
     for (const zoneId of zoneIds) {
       const device = this.deviceByUuid(zoneId)
       if (!device) continue
@@ -550,6 +578,7 @@ export class RealSonosDriver implements SonosDriver {
       if (group && group.members.filter((m) => !m.Invisible).length === 1) continue
       await device.AVTransportService.BecomeCoordinatorOfStandaloneGroup()
     }
+    if (options.settle === false) return
     await this.waitForTopology(
       () =>
         zoneIds.every((id) => {

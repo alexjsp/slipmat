@@ -234,6 +234,10 @@ export class FakeSonosDriver implements SonosDriver {
 
   // --- grouping -----------------------------------------------------------
 
+  async awaitGrouping(): Promise<void> {
+    // The fake applies grouping synchronously; there is nothing to settle.
+  }
+
   async joinGroup(coordinatorZoneId: string, zoneIds: string[]): Promise<void> {
     this.record('joinGroup', coordinatorZoneId, zoneIds)
     this.requireZone(coordinatorZoneId)

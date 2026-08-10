@@ -105,10 +105,22 @@ export interface SonosDriver {
   setMute(zoneId: string, muted: boolean): Promise<void>
 
   // --- grouping -----------------------------------------------------------
-  /** Make `zoneIds` follow `coordinatorZoneId`. */
-  joinGroup(coordinatorZoneId: string, zoneIds: string[]): Promise<void>
+  /**
+   * Make `zoneIds` follow `coordinatorZoneId`.
+   *
+   * `settle: false` issues the joins and returns without waiting for Sonos to
+   * report the new topology, which takes a couple of seconds. Pair it with
+   * `awaitGrouping` when the caller has something better to do meanwhile.
+   */
+  joinGroup(
+    coordinatorZoneId: string,
+    zoneIds: string[],
+    options?: { settle?: boolean },
+  ): Promise<void>
+  /** Wait until Sonos reports `zoneIds` as members of the coordinator's group. */
+  awaitGrouping(coordinatorZoneId: string, zoneIds: string[]): Promise<void>
   /** Break `zoneIds` out into standalone groups of their own. */
-  leaveGroup(zoneIds: string[]): Promise<void>
+  leaveGroup(zoneIds: string[], options?: { settle?: boolean }): Promise<void>
 
   /**
    * Fetch the artwork bytes for a zone. Art lives on the speaker itself, so we
