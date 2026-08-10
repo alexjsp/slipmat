@@ -74,10 +74,56 @@ with no expansion at all, so the most common case never needs the scratch queue.
 
 **Spike this before anything else is built on it (M3).** If a source can't be expanded, the UI marks it *container-only*: it can still play whole under Sonos' native shuffle, it just can't be cross-shuffled with other sources.
 
-Scratch-queue safety: prefer a player that is idle **and** has an empty queue; otherwise `SaveQueue` → expand → clear → restore → delete the temp playlist. The utility zone is configurable in settings.
+Scratch-queue safety: only ever borrow a player that is idle **and** has an
+empty queue. An earlier version snapshotted an occupied queue into a Sonos
+playlist and restored it afterwards; that creates playlists in someone's
+household as a side effect of an internal read, and leaves them behind if the
+process dies mid-expansion — which it did. `saveQueue` is gone from the driver
+so it cannot come back. The utility zone is configurable in settings.
+
+Expansion is now only used to show track counts in the editor. Activation hands
+whole containers to Sonos and lets Sonos expand them, so it never borrows a
+speaker at all.
+
+### Music service search and browsing — investigated, blocked
+
+Browsing into Apple Music the way the Sonos app does, and searching it, both
+need **SMAPI** (the service's own SOAP endpoint — Apple's is
+`https://sonos-music.apple.com/ws/SonosSoap`). Apple Music advertises search in
+its capability bitmask, so the feature exists. What we cannot get is
+credentials:
+
+- `getAppLink` → `SonosError 999`; `getDeviceLinkCode` → empty. So we cannot
+  *create* a link. (Parked on the `service-browsing` branch at 7f32d3a.)
+- `GetSessionId(204)` → `UPnPError 806`, empty and guessed usernames alike. So we
+  cannot borrow the *existing* link either.
+- `/status/accounts` and `/status/householdinfo` return empty documents on S2.
+
+There is also **no local search of any kind**: the speaker's ContentDirectory
+advertises `Browse`, `GetSearchCapabilities` and `GetSortCapabilities` but has
+**no `Search` action**, and `GetSearchCapabilities` returns nothing.
+
+The route that does work, if search is ever wanted: query Apple's own catalogue
+and hand Sonos the id. The public **iTunes Search API** needs no auth and no
+developer account, and its `collectionId` is the same catalogue id an Apple
+Music URL carries — `parseServiceUrl` already accepts it, so the path from a
+search result to a playable container URI is the one pasted links already use.
+Catalogue only: a user's own library and playlists still need real user auth.
+Untested end to end — nobody has confirmed Sonos plays an album sourced this
+way.
 
 ### Preset model
-Per preset: name, icon, colour; zones with per-zone volume; ordered sources; and toggles for **repeat-all**, **dedupe across sources**, `pauseOthers`, crossfade, HomeKit. No track cap — the whole pool gets enqueued. Order is **reshuffled on every activation** (seeded per activation, not stored).
+Per preset: name, icon, colour; zones with per-zone volume; ordered sources; and toggles for **repeat-all**, **dedupe across sources**, `pauseOthers`, crossfade, HomeKit. No track cap — every source is queued whole.
+
+Interleaving is Sonos' own shuffle play mode over a queue holding the sources
+back to back, not an in-memory shuffle: enqueueing track by track costs ~780ms
+per track, so a 2,000-track playlist would take 26 minutes to load. Two details
+are load-bearing and were both found the hard way:
+
+- Sonos always begins at shuffled position 1 and pins the same track there, so
+  without seeking to a random position every activation opens on the same song.
+- That random start only applies with repeat-all on. Starting two thirds into a
+  queue that stops at the end means the first two thirds never play.
 
 A preset may instead be a **single non-shufflable stream** — a radio favourite, TV, or line-in. The editor allows a stream as a solo source and blocks mixing it with track sources; activation just does `SetAVTransportURI` with no queue.
 
