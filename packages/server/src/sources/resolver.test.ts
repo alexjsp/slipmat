@@ -115,6 +115,24 @@ describe('SourceResolver', () => {
     expect(metadata).toContain('<dc:title>A Comet Appears</dc:title>')
   })
 
+  it('gives Sonos longer than the default to expand a container', async () => {
+    // Sonos expands the whole container before it answers, so this call scales
+    // with the playlist: a 2,008-track one measured at 44s against real
+    // hardware, and the library's fixed 30s turned that into a network timeout
+    // reported as "could not be mixed in".
+    const containerUri =
+      'x-rincon-cpcontainer:1006206cspotify%3aplaylist%3a37i9dQZF1DXcBWIGoYBM5M?sid=9&flags=8300&sn=7'
+    driver.setContainerContents(containerUri, [track('x-sonos-spotify:one', 'One')])
+
+    await resolver(true).resolve({
+      kind: 'service_url',
+      ref: 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M',
+    })
+
+    const enqueue = driver.calls.find((call) => call.method === 'addUrisToQueue')
+    expect(enqueue?.args[2]).toBeGreaterThan(60_000)
+  })
+
   it('expands a pasted Spotify playlist via the scratch queue', async () => {
     // Exactly what MetaDataHelper builds, query string and all.
     const containerUri =

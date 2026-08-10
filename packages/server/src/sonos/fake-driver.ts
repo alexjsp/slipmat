@@ -320,11 +320,18 @@ export class FakeSonosDriver implements SonosDriver {
     this.changed()
   }
 
+  async removeTrackFromQueue(zoneId: string, position: number): Promise<void> {
+    this.record('removeTrackFromQueue', zoneId, position)
+    this.groupFor(zoneId).queue.splice(position - 1, 1)
+    this.changed()
+  }
+
   async addUrisToQueue(
     zoneId: string,
     items: { uri: string; metadata?: string; metadataObject?: unknown }[],
+    options: { timeoutMs?: number } = {},
   ): Promise<void> {
-    this.record('addUrisToQueue', zoneId, items.length)
+    this.record('addUrisToQueue', zoneId, items.length, options.timeoutMs)
     const group = this.groupFor(zoneId)
     for (const item of items) {
       // A real speaker expands a container URI into its individual tracks.
@@ -398,6 +405,12 @@ export class FakeSonosDriver implements SonosDriver {
   setUnreachable(zoneId: string, unreachable: boolean) {
     const zone = this.zones.get(zoneId)
     if (zone) zone.unreachable = unreachable
+    this.changed()
+  }
+
+  /** Drive the transport state directly — TRANSITIONING has no other route. */
+  setTransportState(zoneId: string, state: DriverGroup['transportState']) {
+    this.groupFor(zoneId).transportState = state
     this.changed()
   }
 

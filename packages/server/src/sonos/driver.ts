@@ -133,6 +133,13 @@ export interface SonosDriver {
   getQueue(zoneId: string): Promise<DriverBrowseItem[]>
   clearQueue(zoneId: string): Promise<void>
   /**
+   * Drop one track from the queue by its 1-based position.
+   *
+   * Positions shift as tracks are removed, so a caller removing several must
+   * work from the back forwards.
+   */
+  removeTrackFromQueue(zoneId: string, position: number): Promise<void>
+  /**
    * Enqueue in order. Implementations batch to respect the SOAP payload limit.
    *
    * `metadata` is an already-XML-encoded DIDL string (as taken verbatim from a
@@ -143,6 +150,14 @@ export interface SonosDriver {
   addUrisToQueue(
     zoneId: string,
     items: { uri: string; metadata?: string; metadataObject?: unknown }[],
+    options?: {
+      /**
+       * Override the SOAP read timeout. Enqueueing a *container* is not a quick
+       * call: Sonos expands it into individual tracks before it answers, which
+       * for a few thousand tracks takes well over the library's fixed 30s.
+       */
+      timeoutMs?: number
+    },
   ): Promise<void>
   /** Point the coordinator at its own queue. */
   setTransportToQueue(zoneId: string): Promise<void>

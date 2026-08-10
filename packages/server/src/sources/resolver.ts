@@ -6,6 +6,18 @@ import type { DriverBrowseItem, SonosDriver } from '../sonos/driver.js'
 import { isRadioStream } from '../sonos/uris.js'
 import { parseServiceUrl, ServiceNotConnectedError, serviceDisplayName } from './service-urls.js'
 
+/**
+ * How long to let Sonos chew on a container before giving up.
+ *
+ * It expands the whole thing before answering, and that scales with the
+ * playlist: a two-thousand-track Apple Music playlist measured at 44s against
+ * real hardware, comfortably past the library's fixed 30s, which is why such
+ * playlists were being written off as unexpandable. Five minutes is generous
+ * enough to cover a playlist several times that size, and this only ever runs
+ * on a speaker that is idle or about to be cleared anyway.
+ */
+const EXPANSION_TIMEOUT_MS = 5 * 60 * 1000
+
 export type ResolvedTrack = {
   uri: string
   metadata: string | null
@@ -53,6 +65,15 @@ export type ResolveOptions = {
    * couple of speakers, where there may be no idle zone to borrow at all.
    */
   expansionZone?: { zoneId: string; queueIsExpendable: boolean }
+  /**
+   * Resolve only as far as the container, never expanding it into tracks.
+   *
+   * Activation uses this: it hands whole containers to Sonos and lets Sonos do
+   * the expansion, so paying 44s to expand a large playlist ourselves — and
+   * borrowing a speaker to do it — would be pure waste. Expansion still happens
+   * for the editor, which needs a track count to show.
+   */
+  containerOnly?: boolean
 }
 
 /** Where the browse tree starts for each kind of saved content. */
@@ -254,6 +275,11 @@ export class SourceResolver {
       warning,
     })
 
+    if (options.containerOnly) {
+      // Not a failure: the caller is going to hand this to Sonos whole.
+      return { ...containerOnly(''), warning: null }
+    }
+
     if (!this.allowExpansion) {
       return containerOnly(
         'Track-by-track expansion is disabled, so this source can only be played whole under Sonos shuffle — it cannot be mixed with others.',
@@ -282,13 +308,17 @@ export class SourceResolver {
       }
 
       await this.driver.clearQueue(zoneId)
-      await this.driver.addUrisToQueue(zoneId, [
-        {
-          uri: containerUri,
-          metadata: containerMetadata ?? undefined,
-          metadataObject: containerMetadataObject,
-        },
-      ])
+      await this.driver.addUrisToQueue(
+        zoneId,
+        [
+          {
+            uri: containerUri,
+            metadata: containerMetadata ?? undefined,
+            metadataObject: containerMetadataObject,
+          },
+        ],
+        { timeoutMs: EXPANSION_TIMEOUT_MS },
+      )
       const expanded = await this.driver.getQueue(zoneId)
       // Sonos strips the service token from the entries it expands a container
       // into, so carry it across from the container itself. Without it the

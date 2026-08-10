@@ -6,6 +6,7 @@ import { PlayMode } from '@svrooij/sonos/lib/models/playmode.js'
 import type { ZoneGroup } from '@svrooij/sonos/lib/models/zone-group.js'
 import type { AVTransportServiceEvent } from '@svrooij/sonos/lib/services/index.js'
 import type { Logger } from '../logger.js'
+import type { DidlEntry } from './didl.js'
 import { asMetadataDocument, isContainerClass, parseDidl } from './didl.js'
 import type {
   DriverBrowseItem,
@@ -20,7 +21,12 @@ import type {
   SonosDriver,
 } from './driver.js'
 import { UnknownZoneError } from './errors.js'
+import { encodeTrackUri, encodeXml, soapEnvelope } from './soap.js'
 import { formatDuration, parseDuration } from './time.js'
+
+/** Sonos returns at most this many Browse results regardless of what we ask. */
+const QUEUE_PAGE_SIZE = 1000
+
 import { classifyPlaybackKind, followUriFor, queueUriFor } from './uris.js'
 
 /** UPnP subscriptions last ~10 minutes; renew comfortably inside that. */
@@ -619,16 +625,26 @@ export class RealSonosDriver implements SonosDriver {
     // `librarytrack:a.123`. Sonos then rejects that URI when it is handed back,
     // so a queue read through the parsed path yields tracks that cannot be
     // re-enqueued.
-    const response = await device.ContentDirectoryService.Browse({
-      ObjectID: 'Q:0',
-      BrowseFlag: 'BrowseDirectChildren',
-      Filter: '*',
-      StartingIndex: 0,
-      RequestedCount: 1000,
-      SortCriteria: '',
-    })
+    // Paged, because Sonos returns at most a thousand entries per Browse and
+    // says nothing about the ones it left out. A two-thousand-track playlist
+    // read in one call comes back looking exactly like a complete queue.
+    const entries: DidlEntry[] = []
+    let start = 0
+    for (;;) {
+      const page = await device.ContentDirectoryService.Browse({
+        ObjectID: 'Q:0',
+        BrowseFlag: 'BrowseDirectChildren',
+        Filter: '*',
+        StartingIndex: start,
+        RequestedCount: QUEUE_PAGE_SIZE,
+        SortCriteria: '',
+      })
+      const pageEntries = parseDidl(typeof page.Result === 'string' ? page.Result : '')
+      entries.push(...pageEntries)
+      start += pageEntries.length
+      if (pageEntries.length === 0 || start >= page.TotalMatches) break
+    }
 
-    const entries = parseDidl(typeof response.Result === 'string' ? response.Result : '')
     return entries.map((entry) => ({
       id: entry.id,
       title: entry.title || 'Unknown',
@@ -649,11 +665,32 @@ export class RealSonosDriver implements SonosDriver {
     await this.coordinatorFor(zoneId).AVTransportService.RemoveAllTracksFromQueue()
   }
 
+  async removeTrackFromQueue(zoneId: string, position: number): Promise<void> {
+    await this.coordinatorFor(zoneId).AVTransportService.RemoveTrackFromQueue({
+      InstanceID: 0,
+      ObjectID: `Q:0/${position}`,
+      UpdateID: 0,
+    })
+  }
+
   async addUrisToQueue(
     zoneId: string,
     items: { uri: string; metadata?: string; metadataObject?: unknown }[],
+    options: { timeoutMs?: number } = {},
   ): Promise<void> {
     const device = this.coordinatorFor(zoneId)
+
+    // The library fixes its SOAP timeout at 30s, which is fine for a track and
+    // not for a container: Sonos expands the whole thing before it answers, and
+    // a two-thousand-track playlist measured at 44s on real hardware. The
+    // request is reissued here by hand purely to lift that ceiling — same
+    // action, same encoding, so it stays interchangeable with the call below.
+    if (options.timeoutMs !== undefined) {
+      for (const item of items) {
+        await this.addUriToQueueSlowly(device, item, options.timeoutMs)
+      }
+      return
+    }
 
     // One call per item rather than AddMultipleURIsToQueue.
     //
@@ -674,6 +711,50 @@ export class RealSonosDriver implements SonosDriver {
         DesiredFirstTrackNumberEnqueued: 0,
         EnqueueAsNext: false,
       })
+    }
+  }
+
+  /**
+   * `AddURIToQueue` without the library's 30s ceiling.
+   *
+   * Encoding follows the library exactly — `XmlHelper.EncodeTrackUri` for the
+   * URI, a structured metadata object serialised the same way, a string one
+   * inserted verbatim — so the only difference on the wire is how long we are
+   * prepared to wait for the answer.
+   */
+  private async addUriToQueueSlowly(
+    device: SonosDevice,
+    item: { uri: string; metadata?: string; metadataObject?: unknown },
+    timeoutMs: number,
+  ): Promise<void> {
+    const metadata = item.metadataObject
+      ? encodeXml(MetaDataHelper.TrackToMetaData(item.metadataObject as SonosTrack))
+      : (item.metadata ?? '')
+    const body =
+      '<InstanceID>0</InstanceID>' +
+      `<EnqueuedURI>${encodeTrackUri(item.uri)}</EnqueuedURI>` +
+      `<EnqueuedURIMetaData>${metadata}</EnqueuedURIMetaData>` +
+      '<DesiredFirstTrackNumberEnqueued>0</DesiredFirstTrackNumberEnqueued>' +
+      '<EnqueueAsNext>0</EnqueueAsNext>'
+    const envelope = soapEnvelope('AVTransport', 'AddURIToQueue', body)
+
+    const response = await fetch(`http://${device.Host}:1400/MediaRenderer/AVTransport/Control`, {
+      method: 'POST',
+      headers: {
+        SOAPAction: '"urn:schemas-upnp-org:service:AVTransport:1#AddURIToQueue"',
+        'Content-type': 'text/xml; charset=utf8',
+      },
+      body: envelope,
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    const text = await response.text()
+    if (!response.ok) {
+      const code = /<errorCode>(\d+)<\/errorCode>/.exec(text)?.[1]
+      throw new Error(
+        code
+          ? `Sonos error on AddURIToQueue UPnPError ${code}`
+          : `Sonos error on AddURIToQueue HTTP ${response.status}`,
+      )
     }
   }
 

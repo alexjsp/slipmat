@@ -4,7 +4,7 @@ import { and, eq } from 'drizzle-orm'
 import type { Db } from '../db/index.js'
 import { activations } from '../db/schema.js'
 import type { Logger } from '../logger.js'
-import type { SonosDriver } from '../sonos/driver.js'
+import type { DriverPlayMode, SonosDriver } from '../sonos/driver.js'
 import { classifyPlaybackKind, isProtectedFromPauseAll, trackIdentity } from '../sonos/uris.js'
 import type { SourceCache } from '../sources/cache.js'
 import type { ResolvedTrack, ResolveOptions } from '../sources/resolver.js'
@@ -12,14 +12,6 @@ import type { SystemStateStore } from '../state/store.js'
 import type { PresetRepository } from './repository.js'
 import { pickCoordinator } from './repository.js'
 import { clockFrom, evaluateRules } from './rules.js'
-import { buildQueue } from './shuffle.js'
-
-/**
- * Tracks enqueued before playback starts. The rest is appended in the
- * background: a full pool is dozens of sequential SOAP calls, which would mean
- * several seconds of silence after a button press and a HomeKit timeout.
- */
-const FAST_START_TRACKS = 20
 
 /**
  * How long an activation is left alone before reconciliation may retire it.
@@ -28,6 +20,14 @@ const FAST_START_TRACKS = 20
  * anything shorter than this races the speaker it is asking about.
  */
 const SETTLE_GRACE_MS = 10_000
+
+/**
+ * How long to let Sonos chew on a container enqueue.
+ *
+ * It expands the whole thing before answering: 44s for a 2,000-track Apple
+ * Music playlist, comfortably past the library's fixed 30s.
+ */
+const CONTAINER_ENQUEUE_TIMEOUT_MS = 5 * 60 * 1000
 
 export type ActivationDeps = {
   db: Db
@@ -44,7 +44,6 @@ export type ActivationDeps = {
 
 export class ActivationEngine {
   private readonly logger: Logger
-
   constructor(private readonly deps: ActivationDeps) {
     this.logger = deps.logger.child({ component: 'activation' })
   }
@@ -123,12 +122,9 @@ export class ActivationEngine {
       pauseOthers: effective.pauseOthers,
     }
 
-    // The coordinator's queue is about to be cleared and refilled, so it is
-    // the right zone to expand streaming containers on: no other speaker is
-    // disturbed, and it works in a house with nothing idle to borrow.
-    const resolved = await this.resolveSources(effective.sources, warnings, {
-      expansionZone: { zoneId: coordinator.zoneId, queueIsExpendable: true },
-    })
+    // Only far enough to hand each source to Sonos — no expansion, so nothing
+    // borrows a speaker and a huge playlist costs nothing to prepare.
+    const resolved = await this.resolveSources(effective.sources, warnings)
     const streamSource = resolved.find((source) => source.mode === 'stream')
     const containerOnly = resolved.filter((source) => source.mode === 'container_only')
 
@@ -178,70 +174,62 @@ export class ActivationEngine {
       return { activationId, noop: false, warnings }
     }
 
-    const pool = buildQueue(
-      resolved.filter((source) => source.mode === 'tracks').map((source) => source.tracks),
-      {
-        dedupe: preset.dedupe,
-        shuffle: flags.shuffle,
-        seed: options.seed ?? seedFor(activationId),
-      },
+    // Queue each source as a whole container and let Sonos expand it.
+    //
+    // The alternative — expand every source into tracks and enqueue them one at
+    // a time — is what this used to do, and it does not scale: Sonos resolves
+    // each track against the music service before acknowledging the enqueue, so
+    // a 2,000-track playlist took 26 minutes to load. Handing over the container
+    // instead is a single call that Sonos answers in 44s for the same playlist,
+    // and the first source is usually far smaller than that, so playback starts
+    // in about a second.
+    //
+    // Interleaving then falls to Sonos' own shuffle mode rather than an
+    // in-memory Fisher-Yates: the queue holds the sources back to back, and
+    // shuffle picks across the whole of it, which is the same thing a listener
+    // hears. Deduplication moves onto the queue afterwards, where a removal
+    // costs about 4ms.
+    const playable = resolved.filter(
+      (source) => source.mode === 'tracks' || source.mode === 'container_only',
     )
-
-    if (pool.length === 0) {
-      // Nothing expandable — fall back to playing a container whole under
-      // Sonos' own shuffle, which is better than silence.
-      const fallback = containerOnly[0]
-      if (!fallback?.containerUri) {
-        throw new Error(`${preset.name} has no playable tracks`)
-      }
-      warnings.push(`Playing "${fallback.label}" whole — its tracks could not be listed`)
-      await this.deps.driver.clearQueue(coordinator.zoneId)
-      await this.deps.driver.addUrisToQueue(coordinator.zoneId, [
-        {
-          uri: fallback.containerUri,
-          metadata: fallback.containerMetadata ?? undefined,
-          metadataObject: fallback.containerMetadataObject,
-        },
-      ])
-      await this.deps.driver.setPlayMode(coordinator.zoneId, 'SHUFFLE')
-      await this.deps.driver.setTransportToQueue(coordinator.zoneId)
-      await this.deps.driver.play(coordinator.zoneId)
-
-      const queue = await this.deps.driver.getQueue(coordinator.zoneId)
-      this.recordActivation({
-        activationId,
-        preset,
-        coordinatorZoneId: coordinator.zoneId,
-        memberZoneIds: members.map((zone) => zone.zoneId),
-        trackUris: queue.map((item) => item.uri).filter((uri): uri is string => !!uri),
-        streamUri: null,
-        warnings,
-      })
-      this.deps.store.refresh()
-      return { activationId, noop: false, warnings }
+    if (playable.length === 0) {
+      throw new Error(`${preset.name} has no playable sources`)
     }
 
-    for (const source of containerOnly) {
-      warnings.push(`"${source.label}" could not be mixed in and was skipped`)
-    }
+    await this.deps.driver.clearQueue(coordinator.zoneId)
+    // Sonos answers a container enqueue only once it has expanded the whole
+    // thing — 1s for a 25-track mix, 44s for a 2,000-track playlist — so which
+    // source goes first decides how long the room stays silent. When shuffle is
+    // on, queue order has no effect on what gets played, so the smallest known
+    // source goes first purely to start the music sooner. With shuffle off the
+    // preset's order *is* the playback order and must be left alone.
+    const ordered = flags.shuffle ? [...playable].sort(bySmallestKnownFirst) : playable
+    const [head, ...tail] = ordered
+    await this.enqueueSource(coordinator.zoneId, head!)
+    await this.deps.driver.setPlayMode(
+      coordinator.zoneId,
+      playModeFor({ shuffle: flags.shuffle, repeatAll: flags.repeatAll }),
+    )
+    await this.deps.driver.setTransportToQueue(coordinator.zoneId)
+    await this.deps.driver.play(coordinator.zoneId)
 
-    await this.startQueue(coordinator.zoneId, flags.repeatAll, pool)
-
+    const head_queue = await this.deps.driver.getQueue(coordinator.zoneId)
     this.recordActivation({
       activationId,
       preset,
       coordinatorZoneId: coordinator.zoneId,
       memberZoneIds: members.map((zone) => zone.zoneId),
-      trackUris: pool.slice(0, FAST_START_TRACKS).map((track) => track.uri),
+      trackUris: head_queue.map((item) => item.uri).filter((uri): uri is string => !!uri),
       streamUri: null,
       warnings,
     })
 
-    // Append the tail behind playback, widening the activation's URI set as it
-    // goes so active-state detection keeps matching.
-    void this.appendRemainder(activationId, coordinator.zoneId, pool).catch((err) =>
-      this.logger.warn({ err, presetId: preset.id }, 'failed to append queue tail'),
-    )
+    // The rest fills in behind playback.
+    void this.fillQueue(activationId, coordinator.zoneId, tail, {
+      dedupe: preset.dedupe,
+      shuffle: flags.shuffle,
+      repeatAll: flags.repeatAll,
+    }).catch((err) => this.logger.warn({ err, presetId: preset.id }, 'failed to fill queue'))
 
     this.deps.store.refresh()
     return { activationId, noop: false, warnings }
@@ -271,7 +259,13 @@ export class ActivationEngine {
     const group = snapshot.groups.find(
       (candidate) => candidate.coordinatorZoneId === activation.coordinatorZoneId,
     )
-    if (group?.transportState !== 'PLAYING') return false
+    // TRANSITIONING counts as playing. Sonos passes through it between every
+    // pair of tracks, and for minutes on end while a large preset's tail is
+    // still being appended — treating it as stopped makes a preset flicker off
+    // at every track change and stay off through the whole append.
+    if (group?.transportState !== 'PLAYING' && group?.transportState !== 'TRANSITIONING') {
+      return false
+    }
 
     const members = new Set(group.memberZoneIds)
     const expected = JSON.parse(activation.memberZoneIdsJson) as string[]
@@ -311,16 +305,16 @@ export class ActivationEngine {
   private async resolveSources(
     sources: { kind: SourceKind; ref: string; label: string }[],
     warnings: string[],
-    options: ResolveOptions = {},
   ) {
     const resolved = []
     for (const source of sources) {
       try {
         resolved.push(
-          await this.deps.cache.get(
-            { kind: source.kind, ref: source.ref, label: source.label },
-            options,
-          ),
+          await this.deps.cache.forPlayback({
+            kind: source.kind,
+            ref: source.ref,
+            label: source.label,
+          }),
         )
       } catch (err) {
         this.logger.warn({ err, ref: source.ref }, 'source failed to resolve')
@@ -373,48 +367,134 @@ export class ActivationEngine {
     }
   }
 
-  private async startQueue(coordinatorZoneId: string, repeatAll: boolean, pool: ResolvedTrack[]) {
-    await this.deps.driver.clearQueue(coordinatorZoneId)
-    await this.deps.driver.addUrisToQueue(
-      coordinatorZoneId,
-      pool.slice(0, FAST_START_TRACKS).map((track) => ({
-        uri: track.uri,
-        metadata: track.metadata ?? undefined,
-      })),
+  /**
+   * Put one source into the queue.
+   *
+   * A container goes in whole and Sonos expands it — one call, and the tracks
+   * arrive with full metadata because Sonos resolved them itself. Sources with
+   * no container URI (Sonos playlists and the local library, which are browsed
+   * rather than pointed at) fall back to their individual tracks.
+   */
+  private async enqueueSource(zoneId: string, source: EnqueueableSource): Promise<void> {
+    const started = Date.now()
+    if (source.containerUri) {
+      await this.deps.driver.addUrisToQueue(
+        zoneId,
+        [
+          {
+            uri: source.containerUri,
+            metadata: source.containerMetadata ?? undefined,
+            metadataObject: source.containerMetadataObject,
+          },
+        ],
+        // Sonos expands the container before answering, which for a few
+        // thousand tracks is well past the default timeout.
+        { timeoutMs: CONTAINER_ENQUEUE_TIMEOUT_MS },
+      )
+    } else {
+      await this.deps.driver.addUrisToQueue(
+        zoneId,
+        source.tracks.map((track) => ({ uri: track.uri, metadata: track.metadata ?? undefined })),
+      )
+    }
+    this.logger.debug(
+      {
+        label: source.label,
+        viaContainer: !!source.containerUri,
+        elapsedMs: Date.now() - started,
+      },
+      'queued source',
     )
-    // Already shuffled, so NORMAL — letting Sonos shuffle too would undo the
-    // careful cross-source interleave.
-    await this.deps.driver.setPlayMode(coordinatorZoneId, repeatAll ? 'REPEAT_ALL' : 'NORMAL')
-    await this.deps.driver.setTransportToQueue(coordinatorZoneId)
-    await this.deps.driver.play(coordinatorZoneId)
   }
 
-  private async appendRemainder(
+  /**
+   * Add the remaining sources behind playback, then dedupe and re-shuffle.
+   *
+   * Liveness is checked between sources: stopping the preset, or starting
+   * another on the same speakers, must not leave this still stuffing tracks in
+   * behind the new music.
+   */
+  private async fillQueue(
     activationId: string,
-    coordinatorZoneId: string,
-    pool: ResolvedTrack[],
-  ) {
-    const remainder = pool.slice(FAST_START_TRACKS)
-    if (remainder.length === 0) return
+    zoneId: string,
+    sources: EnqueueableSource[],
+    options: { dedupe: boolean; shuffle: boolean; repeatAll: boolean },
+  ): Promise<void> {
+    for (const source of sources) {
+      if (!this.isLive(activationId)) {
+        this.logger.info({ activationId }, 'queue fill abandoned; activation is no longer live')
+        return
+      }
+      await this.enqueueSource(zoneId, source)
+    }
+    if (!this.isLive(activationId)) return
 
-    await this.deps.driver.addUrisToQueue(
-      coordinatorZoneId,
-      remainder.map((track) => ({ uri: track.uri, metadata: track.metadata ?? undefined })),
-    )
+    if (options.dedupe) await this.dedupeQueue(zoneId)
+    if (!this.isLive(activationId)) return
 
-    // Only widen a still-live activation; a stop mid-append must not resurrect it.
-    const row = this.deps.db
-      .select()
-      .from(activations)
-      .where(eq(activations.id, activationId))
-      .get()
-    if (!row?.live) return
+    // Re-asserted now the queue is complete, so Sonos shuffles across all of it
+    // rather than across whatever was present when playback began.
+    await this.deps.driver.setPlayMode(zoneId, playModeFor(options))
 
+    const queue = await this.deps.driver.getQueue(zoneId)
+    if (!this.isLive(activationId)) return
     this.deps.db
       .update(activations)
-      .set({ trackUrisJson: JSON.stringify(pool.map((track) => track.uri)) })
+      .set({
+        trackUrisJson: JSON.stringify(
+          queue.map((item) => item.uri).filter((uri): uri is string => !!uri),
+        ),
+      })
       .where(eq(activations.id, activationId))
       .run()
+  }
+
+  /**
+   * Drop tracks the queue already contains.
+   *
+   * Sources overlap — a favourites mix and a "great music" playlist share
+   * plenty — and enqueuing containers wholesale means those duplicates land in
+   * the queue. Removals go back to front because each one shifts the positions
+   * after it.
+   */
+  private async dedupeQueue(zoneId: string): Promise<void> {
+    const queue = await this.deps.driver.getQueue(zoneId)
+    const group = this.deps.driver
+      .snapshot()
+      .groups.find((candidate) => candidate.coordinatorZoneId === zoneId)
+    // Whatever is playing right now stays, even if it is the duplicate: pulling
+    // it out from under the transport skips the track someone is listening to.
+    const playing = trackIdentity(group?.currentTrackUri)
+
+    const seen = new Set<string>()
+    const duplicates: number[] = []
+    queue.forEach((item, index) => {
+      const identity = trackIdentity(item.uri)
+      if (!identity) return
+      if (!seen.has(identity)) {
+        seen.add(identity)
+        return
+      }
+      if (identity === playing) return
+      duplicates.push(index + 1)
+    })
+    if (duplicates.length === 0) return
+
+    const started = Date.now()
+    for (const position of duplicates.reverse()) {
+      await this.deps.driver.removeTrackFromQueue(zoneId, position).catch((err) => {
+        this.logger.debug({ err, position }, 'failed to remove duplicate')
+      })
+    }
+    this.logger.info(
+      { removed: duplicates.length, of: queue.length, elapsedMs: Date.now() - started },
+      'deduped queue',
+    )
+  }
+
+  private isLive(activationId: string): boolean {
+    return !!this.deps.db.select().from(activations).where(eq(activations.id, activationId)).get()
+      ?.live
   }
 
   // --- bookkeeping --------------------------------------------------------
@@ -475,4 +555,40 @@ function seedFor(activationId: string): number {
     hash = (Math.imul(31, hash) + activationId.charCodeAt(index)) | 0
   }
   return hash >>> 0
+}
+
+/**
+ * A resolved source in the form the queue builder needs: either something Sonos
+ * can expand itself, or a list of tracks to add individually.
+ */
+type EnqueueableSource = {
+  label: string
+  containerUri: string | null
+  containerMetadata: string | null
+  containerMetadataObject?: unknown
+  tracks: ResolvedTrack[]
+}
+
+/**
+ * Sonos does the interleaving now, so shuffle is a play mode rather than
+ * something we bake into queue order.
+ */
+function playModeFor(flags: { shuffle: boolean; repeatAll: boolean }): DriverPlayMode {
+  if (flags.shuffle) return flags.repeatAll ? 'SHUFFLE' : 'SHUFFLE_NOREPEAT'
+  return flags.repeatAll ? 'REPEAT_ALL' : 'NORMAL'
+}
+
+/**
+ * Smallest known track count first, unknown counts last.
+ *
+ * Only used when shuffle is on, where queue order does not affect playback —
+ * it exists so the first container Sonos has to expand is a small one, which
+ * is the difference between music in a second and music in three quarters of a
+ * minute. A source with no cached count could be either, so it does not get to
+ * hold up the start.
+ */
+function bySmallestKnownFirst(a: EnqueueableSource, b: EnqueueableSource): number {
+  const sizeOf = (source: EnqueueableSource) =>
+    source.tracks.length > 0 ? source.tracks.length : Number.MAX_SAFE_INTEGER
+  return sizeOf(a) - sizeOf(b)
 }

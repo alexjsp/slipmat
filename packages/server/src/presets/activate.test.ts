@@ -50,6 +50,18 @@ function presetInput(overrides: Partial<PresetInput> = {}): PresetInput {
   }
 }
 
+/**
+ * Let the fire-and-forget queue fill finish.
+ *
+ * Activation queues the first source, starts playback and returns; the rest go
+ * in behind it. Anything asserting on the *whole* queue has to wait for that.
+ */
+const settle = async () => {
+  for (let index = 0; index < 50; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+}
+
 // Everything here runs against the fake household and an in-memory database.
 describe('ActivationEngine', () => {
   let driver: FakeSonosDriver
@@ -114,24 +126,22 @@ describe('ActivationEngine', () => {
     expect(firstVolumeIndex).toBeGreaterThan(joinIndex)
   })
 
-  it('interleaves tracks from several sources rather than concatenating', async () => {
+  it('queues every source and leaves the interleaving to Sonos shuffle', async () => {
     const preset = create({
       sources: [
         { kind: 'sonos_playlist', ref: 'SQ:1', label: 'Jazz' },
         { kind: 'sonos_playlist', ref: 'SQ:2', label: 'Rock' },
       ],
     })
-    // Fixed seed: a correct shuffle can legitimately produce the concatenated
-    // order by chance (1 in 20 for 3+3 tracks), so asserting against it with a
-    // random seed is a flaky test, not a stronger one.
-    await engine.activate(preset, { seed: 12345 })
+    await engine.activate(preset)
+    await settle()
 
+    // The queue holds the sources back to back; shuffle mode is what mixes
+    // them at playback time. Interleaving them in the queue instead would mean
+    // enqueueing track by track, which costs ~780ms each against real hardware.
     const queue = driver.queueOf(KITCHEN)
-    expect(queue).toHaveLength(6)
-    const prefixes = queue.map((uri) => uri.split('-')[0])
-    expect(new Set(prefixes)).toEqual(new Set(['jazz', 'rock']))
     expect([...queue].sort()).toEqual(['jazz-1', 'jazz-2', 'jazz-3', 'rock-1', 'rock-2', 'rock-3'])
-    expect(prefixes).not.toEqual(['jazz', 'jazz', 'jazz', 'rock', 'rock', 'rock'])
+    expect(driver.playModeOf(KITCHEN)).toBe('SHUFFLE')
   })
 
   it('plays sources in order when shuffle is off', async () => {
@@ -143,6 +153,7 @@ describe('ActivationEngine', () => {
       ],
     })
     await engine.activate(preset)
+    await settle()
 
     expect(driver.queueOf(KITCHEN)).toEqual([
       'jazz-1',
@@ -245,12 +256,20 @@ describe('ActivationEngine', () => {
     expect(group?.transportState).toBe('PLAYING')
   })
 
-  it('sets repeat-all when asked, and plain NORMAL otherwise', async () => {
+  it('maps the shuffle and repeat flags onto a Sonos play mode', async () => {
+    // Shuffle is a play mode now, not a queue order, so both flags land here.
     await engine.activate(create())
+    expect(driver.playModeOf(KITCHEN)).toBe('SHUFFLE')
+
+    await engine.activate(create({ shuffle: true, repeatAll: false }), { restart: true })
+    expect(driver.playModeOf(KITCHEN)).toBe('SHUFFLE_NOREPEAT')
+
+    await engine.activate(create({ shuffle: false, repeatAll: true }), { restart: true })
     expect(driver.playModeOf(KITCHEN)).toBe('REPEAT_ALL')
 
     const other = create({
-      name: 'No repeat',
+      name: 'Neither',
+      shuffle: false,
       repeatAll: false,
       zones: [{ zoneId: OFFICE, volume: 20, isCoordinator: true }],
     })
@@ -455,10 +474,103 @@ describe('ActivationEngine', () => {
     })
   })
 
+  describe('very large pools', () => {
+    it('queues every track of a very large pool, uncapped', async () => {
+      driver.setBrowseResult(
+        'SQ:1',
+        Array.from({ length: 1000 }, (_, index) => track(`jazz-${index}`)),
+      )
+      driver.setBrowseResult(
+        'SQ:2',
+        Array.from({ length: 1000 }, (_, index) => track(`rock-${index}`)),
+      )
+      const preset = create({
+        sources: [
+          { kind: 'sonos_playlist', ref: 'SQ:1', label: 'Jazz' },
+          { kind: 'sonos_playlist', ref: 'SQ:2', label: 'Rock' },
+        ],
+      })
+
+      await engine.activate(preset)
+      await settle()
+
+      expect(driver.queueOf(KITCHEN)).toHaveLength(2000)
+    })
+
+    it('starts with the smallest source so the room is not silent for a minute', async () => {
+      // Sonos answers a container enqueue only after expanding it, so listing a
+      // huge playlist first would mean 44s of silence. Order is irrelevant
+      // under shuffle, so the small source is queued first deliberately.
+      driver.setBrowseResult(
+        'SQ:1',
+        Array.from({ length: 800 }, (_, index) => track(`jazz-${index}`)),
+      )
+      driver.setBrowseResult('SQ:2', [track('rock-1'), track('rock-2')])
+      const preset = create({
+        sources: [
+          { kind: 'sonos_playlist', ref: 'SQ:1', label: 'Huge' },
+          { kind: 'sonos_playlist', ref: 'SQ:2', label: 'Small' },
+        ],
+      })
+
+      await engine.activate(preset)
+      await settle()
+
+      // The first enqueue — the one playback waits on — carried two tracks.
+      const enqueues = driver.calls.filter((call) => call.method === 'addUrisToQueue')
+      expect(enqueues[0]?.args[1]).toBe(2)
+      expect(driver.queueOf(KITCHEN)).toHaveLength(802)
+    })
+
+    it('leaves the playing track alone when deduping', async () => {
+      // Pulling it out from under the transport would skip the song someone is
+      // listening to, so a duplicate of the current track is left in place.
+      driver.setBrowseResult('SQ:1', [track('a'), track('b')])
+      driver.setBrowseResult('SQ:2', [track('a'), track('b')])
+      const preset = create({
+        dedupe: true,
+        sources: [
+          { kind: 'sonos_playlist', ref: 'SQ:1', label: 'One' },
+          { kind: 'sonos_playlist', ref: 'SQ:2', label: 'Two' },
+        ],
+      })
+
+      await engine.activate(preset)
+      driver.setPlaying(KITCHEN, 'x-rincon-queue:k#0', 'a')
+      await settle()
+
+      const queue = driver.queueOf(KITCHEN)
+      expect(queue.filter((uri) => uri === 'a')).toHaveLength(2)
+      expect(queue.filter((uri) => uri === 'b')).toHaveLength(1)
+    })
+
+    it('abandons the append when the activation is superseded mid-flight', async () => {
+      driver.setBrowseResult(
+        'SQ:1',
+        Array.from({ length: 200 }, (_, index) => track(`jazz-${index}`)),
+      )
+      const preset = create()
+      await engine.activate(preset)
+
+      // Stopping it must not leave a background fill still adding sources.
+      const stopped = await engine.stop(preset.id)
+      expect(stopped).toBe(true)
+      expect(engine.liveActivation(preset.id)).toBeUndefined()
+    })
+  })
+
   describe('active-state detection', () => {
     it('reports active while our queue is playing on the right speakers', async () => {
       const preset = create()
       await engine.activate(preset)
+      expect(engine.isStillPlaying(preset.id)).toBe(true)
+    })
+
+    it('stays active while the coordinator is between tracks', async () => {
+      const preset = create()
+      await engine.activate(preset)
+      driver.setTransportState(KITCHEN, 'TRANSITIONING')
+
       expect(engine.isStillPlaying(preset.id)).toBe(true)
     })
 
