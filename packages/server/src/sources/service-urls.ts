@@ -134,3 +134,28 @@ export function parseServiceUrl(input: string): ServiceRef {
 export function isContainerRef(ref: ServiceRef): boolean {
   return ref.kind !== 'track'
 }
+
+/**
+ * The music service isn't connected to this Sonos household.
+ *
+ * Distinct from a resolution failure: there is no fallback here. Sonos will
+ * refuse to play the container whole as well, so telling the user it's
+ * "container only" would be a lie that surfaces later as silence.
+ */
+export class ServiceNotConnectedError extends Error {
+  constructor(service: string) {
+    super(
+      `${service} isn't connected to your Sonos system. Add it in the Sonos app under Settings → Services, then try again.`,
+    )
+    this.name = 'ServiceNotConnectedError'
+  }
+}
+
+const SERVICE_NAMES: Record<ServiceRef['service'], string> = {
+  spotify: 'Spotify',
+  apple: 'Apple Music',
+}
+
+export function serviceDisplayName(service: ServiceRef['service']): string {
+  return SERVICE_NAMES[service]
+}

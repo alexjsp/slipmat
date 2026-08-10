@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { SonosDriver } from '../sonos/driver.js'
 import { isRadioStream } from '../sonos/uris.js'
 import { ROOT_OBJECT_IDS, type SourceResolver } from '../sources/resolver.js'
-import { UnsupportedServiceUrlError } from '../sources/service-urls.js'
+import { ServiceNotConnectedError, UnsupportedServiceUrlError } from '../sources/service-urls.js'
 
 export type SourceRoutesDeps = {
   driver: SonosDriver
@@ -114,6 +114,9 @@ export async function registerSourceRoutes(
     } catch (err) {
       if (err instanceof UnsupportedServiceUrlError) {
         return reply.status(400).send({ error: 'unsupported_url', message: err.message })
+      }
+      if (err instanceof ServiceNotConnectedError) {
+        return reply.status(400).send({ error: 'service_not_connected', message: err.message })
       }
       request.log.warn({ err, url: body.url }, 'resolve failed')
       return reply.status(502).send({

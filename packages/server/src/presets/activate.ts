@@ -175,7 +175,11 @@ export class ActivationEngine {
       warnings.push(`Playing "${fallback.label}" whole — its tracks could not be listed`)
       await this.deps.driver.clearQueue(coordinator.zoneId)
       await this.deps.driver.addUrisToQueue(coordinator.zoneId, [
-        { uri: fallback.containerUri, metadata: fallback.containerMetadata ?? undefined },
+        {
+          uri: fallback.containerUri,
+          metadata: fallback.containerMetadata ?? undefined,
+          metadataObject: fallback.containerMetadataObject,
+        },
       ])
       await this.deps.driver.setPlayMode(coordinator.zoneId, 'SHUFFLE')
       await this.deps.driver.setTransportToQueue(coordinator.zoneId)

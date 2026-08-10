@@ -587,6 +587,7 @@ export class RealSonosDriver implements SonosDriver {
         id: entry.id,
         title: entry.title || 'Unknown',
         subtitle: entry.creator ?? entry.album ?? null,
+        album: entry.album,
         artUrl: entry.albumArtUri
           ? new URL(entry.albumArtUri, `http://${device.Host}:1400`).toString()
           : null,
@@ -624,7 +625,10 @@ export class RealSonosDriver implements SonosDriver {
     await this.coordinatorFor(zoneId).AVTransportService.RemoveAllTracksFromQueue()
   }
 
-  async addUrisToQueue(zoneId: string, items: { uri: string; metadata?: string }[]): Promise<void> {
+  async addUrisToQueue(
+    zoneId: string,
+    items: { uri: string; metadata?: string; metadataObject?: unknown }[],
+  ): Promise<void> {
     const device = this.coordinatorFor(zoneId)
 
     // AddMultipleURIsToQueue only accepts individual track URIs — handing it a
@@ -635,7 +639,11 @@ export class RealSonosDriver implements SonosDriver {
       await device.AVTransportService.AddURIToQueue({
         InstanceID: 0,
         EnqueuedURI: container.uri,
-        EnqueuedURIMetaData: container.metadata ?? '',
+        // An object here is serialised *and XML-encoded* by the transport; a
+        // string is inserted verbatim and must already be encoded. Passing a
+        // hand-stringified DIDL gets UPnP 402, which is why the object form
+        // wins when we have it.
+        EnqueuedURIMetaData: (container.metadataObject as SonosTrack) ?? container.metadata ?? '',
         DesiredFirstTrackNumberEnqueued: 0,
         EnqueueAsNext: false,
       })
@@ -730,6 +738,7 @@ function toBrowseItem(track: SonosTrack, host: string): DriverBrowseItem {
     id: track.ItemId ?? track.TrackUri ?? '',
     title: track.Title ?? 'Unknown',
     subtitle: track.Artist ?? track.Album ?? null,
+    album: track.Album ?? null,
     artUrl: art ? new URL(art, `http://${host}:1400`).toString() : null,
     isContainer: upnpClass.startsWith('object.container'),
     uri: track.TrackUri ?? null,

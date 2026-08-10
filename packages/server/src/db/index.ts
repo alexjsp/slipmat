@@ -61,9 +61,14 @@ const DDL = [
     tracks_json TEXT NOT NULL,
     container_uri TEXT,
     container_metadata TEXT,
+    container_metadata_object_json TEXT,
     warning TEXT,
     resolved_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   )`,
+
+  // Added after the table shipped; SQLite has no ADD COLUMN IF NOT EXISTS, so
+  // the duplicate-column error is expected and ignored on an up-to-date db.
+  `ALTER TABLE resolved_sources ADD COLUMN container_metadata_object_json TEXT`,
 
   `CREATE TABLE IF NOT EXISTS activations (
     id TEXT PRIMARY KEY,
@@ -113,7 +118,14 @@ export function openDatabase(options: { dataDir: string } | { inMemory: true }) 
   if (!('inMemory' in options)) sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
 
-  for (const statement of DDL) sqlite.exec(statement)
+  for (const statement of DDL) {
+    try {
+      sqlite.exec(statement)
+    } catch (err) {
+      // Only "column already exists" from the ALTERs above is survivable.
+      if (!(err instanceof Error) || !/duplicate column name/i.test(err.message)) throw err
+    }
+  }
 
   return drizzle(sqlite, { schema })
 }

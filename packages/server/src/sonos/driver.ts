@@ -60,6 +60,7 @@ export type DriverBrowseItem = {
   id: string
   title: string
   subtitle: string | null
+  album: string | null
   artUrl: string | null
   isContainer: boolean
   /** Playable resource, absent for pure containers. */
@@ -131,8 +132,18 @@ export interface SonosDriver {
 
   getQueue(zoneId: string): Promise<DriverBrowseItem[]>
   clearQueue(zoneId: string): Promise<void>
-  /** Enqueue in order. Implementations batch to respect the SOAP payload limit. */
-  addUrisToQueue(zoneId: string, items: { uri: string; metadata?: string }[]): Promise<void>
+  /**
+   * Enqueue in order. Implementations batch to respect the SOAP payload limit.
+   *
+   * `metadata` is an already-XML-encoded DIDL string (as taken verbatim from a
+   * favourite's `r:resMD`). `metadataObject` is structured metadata the
+   * transport encodes itself — required for pasted service URLs, where a
+   * hand-stringified value is rejected with UPnP 402.
+   */
+  addUrisToQueue(
+    zoneId: string,
+    items: { uri: string; metadata?: string; metadataObject?: unknown }[],
+  ): Promise<void>
   /** Point the coordinator at its own queue. */
   setTransportToQueue(zoneId: string): Promise<void>
   /** Point the coordinator at a single URI — a radio stream, TV, or line-in. */

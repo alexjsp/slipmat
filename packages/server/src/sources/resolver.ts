@@ -3,7 +3,7 @@ import { MetaDataHelper } from '@svrooij/sonos'
 import type { Logger } from '../logger.js'
 import type { DriverBrowseItem, SonosDriver } from '../sonos/driver.js'
 import { isRadioStream } from '../sonos/uris.js'
-import { parseServiceUrl } from './service-urls.js'
+import { parseServiceUrl, ServiceNotConnectedError, serviceDisplayName } from './service-urls.js'
 
 export type ResolvedTrack = {
   uri: string
@@ -22,6 +22,11 @@ export type ResolvedSource = {
    */
   containerUri: string | null
   containerMetadata: string | null
+  /**
+   * Structured metadata for pasted service URLs. Kept alongside the string
+   * form because Sonos rejects hand-stringified DIDL for these containers.
+   */
+  containerMetadataObject?: unknown
   warning: string | null
 }
 
@@ -169,7 +174,13 @@ export class SourceResolver {
       return this.singleUri(guessed.TrackUri, metadata, label)
     }
 
-    return this.expandContainer(guessed.TrackUri, metadata, label)
+    return this.expandContainer(
+      guessed.TrackUri,
+      metadata,
+      label,
+      guessed,
+      serviceDisplayName(ref.service),
+    )
   }
 
   private singleUri(uri: string, metadata: string | null, label: string): ResolvedSource {
@@ -196,6 +207,8 @@ export class SourceResolver {
     containerUri: string,
     containerMetadata: string | null,
     label: string,
+    containerMetadataObject?: unknown,
+    serviceName?: string,
   ): Promise<ResolvedSource> {
     const containerOnly = (warning: string): ResolvedSource => ({
       mode: 'container_only',
@@ -203,6 +216,7 @@ export class SourceResolver {
       tracks: [],
       containerUri,
       containerMetadata,
+      containerMetadataObject,
       warning,
     })
 
@@ -228,7 +242,11 @@ export class SourceResolver {
 
       await this.driver.clearQueue(zoneId)
       await this.driver.addUrisToQueue(zoneId, [
-        { uri: containerUri, metadata: containerMetadata ?? undefined },
+        {
+          uri: containerUri,
+          metadata: containerMetadata ?? undefined,
+          metadataObject: containerMetadataObject,
+        },
       ])
       const expanded = await this.driver.getQueue(zoneId)
       const tracks = expanded.filter((item) => item.uri).map(toResolvedTrack)
@@ -240,13 +258,21 @@ export class SourceResolver {
       this.logger.info({ containerUri, count: tracks.length, zoneId }, 'expanded container')
       return {
         mode: 'tracks',
-        label,
+        // "apple playlist" is a placeholder; once Sonos has told us what the
+        // tracks are, the album name is a far better default preset label.
+        label: albumLabel(expanded) ?? label,
         tracks,
         containerUri,
         containerMetadata,
+        containerMetadataObject,
         warning: null,
       }
     } catch (err) {
+      // UPnP 800 on a service container means Sonos has no account for that
+      // service — playing it whole would fail too, so don't pretend otherwise.
+      if (serviceName && isServiceUnavailable(err)) {
+        throw new ServiceNotConnectedError(serviceName)
+      }
       this.logger.warn({ err, containerUri, zoneId }, 'scratch-queue expansion failed')
       return containerOnly(
         'Sonos would not expand this source into tracks, so it can only be played whole.',
@@ -306,4 +332,24 @@ function toResolvedTrack(item: DriverBrowseItem): ResolvedTrack {
     title: item.title,
     artist: item.subtitle,
   }
+}
+
+/** Sonos answers 800 for "no account for this service", among other things. */
+function isServiceUnavailable(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'UpnpErrorCode' in err &&
+    (err as { UpnpErrorCode: unknown }).UpnpErrorCode === 800
+  )
+}
+
+/**
+ * When every expanded track shares an album, that album name is a better label
+ * than the generic "<service> <kind>" placeholder we started with.
+ */
+function albumLabel(items: DriverBrowseItem[]): string | null {
+  const albums = new Set(items.map((item) => item.album).filter(Boolean))
+  const [only] = [...albums]
+  return albums.size === 1 && only ? only : null
 }

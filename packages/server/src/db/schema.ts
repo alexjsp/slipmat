@@ -65,6 +65,8 @@ export const resolvedSources = sqliteTable('resolved_sources', {
   tracksJson: text('tracks_json').notNull(),
   containerUri: text('container_uri'),
   containerMetadata: text('container_metadata'),
+  /** Structured metadata for pasted service URLs; see driver.addUrisToQueue. */
+  containerMetadataObjectJson: text('container_metadata_object_json'),
   warning: text('warning'),
   resolvedAt: text('resolved_at').notNull().default(now),
 })

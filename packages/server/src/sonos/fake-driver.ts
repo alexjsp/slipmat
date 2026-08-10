@@ -320,7 +320,10 @@ export class FakeSonosDriver implements SonosDriver {
     this.changed()
   }
 
-  async addUrisToQueue(zoneId: string, items: { uri: string; metadata?: string }[]): Promise<void> {
+  async addUrisToQueue(
+    zoneId: string,
+    items: { uri: string; metadata?: string; metadataObject?: unknown }[],
+  ): Promise<void> {
     this.record('addUrisToQueue', zoneId, items.length)
     const group = this.groupFor(zoneId)
     for (const item of items) {
@@ -334,6 +337,7 @@ export class FakeSonosDriver implements SonosDriver {
           id: item.uri,
           title: item.uri,
           subtitle: null,
+          album: null,
           artUrl: null,
           isContainer: false,
           uri: item.uri,
