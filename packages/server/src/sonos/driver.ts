@@ -174,7 +174,8 @@ export interface SonosDriver {
   setPlayMode(zoneId: string, mode: DriverPlayMode): Promise<void>
   setCrossfade(zoneId: string, enabled: boolean): Promise<void>
 
-  /** Snapshot the queue to a Sonos playlist so it can be restored afterwards. */
-  saveQueue(zoneId: string, title: string): Promise<string>
-  removeSavedQueue(objectId: string): Promise<void>
+  // Deliberately no saveQueue/removeSavedQueue. Snapshotting a queue means
+  // creating a Sonos playlist in someone's household as a side effect of an
+  // internal operation, and leaving it behind if the process dies before the
+  // cleanup runs. Nothing here may add playlists to a user's system.
 }

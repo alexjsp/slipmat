@@ -120,7 +120,15 @@ export function GroupCard({
           <div className="flex items-center gap-2 px-4 pb-2 text-muted-foreground text-xs tabular-nums">
             <span>{formatTime(position ?? 0)}</span>
             <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+              {/*
+                Keyed by track so a new one remounts the bar. The width is
+                animated to keep playback smooth between position polls, and
+                without the remount that animation also runs *backwards* across
+                the whole bar when a track ends. A CSS transition never runs on
+                a freshly mounted element, so this resets instantly.
+              */}
               <div
+                key={group.currentTrack?.uri ?? 'none'}
                 className={cn(
                   'h-full rounded-full bg-primary transition-[width] duration-500 ease-linear',
                 )}

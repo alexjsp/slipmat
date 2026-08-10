@@ -70,7 +70,6 @@ export class FakeSonosDriver implements SonosDriver {
   /** What each container URI expands into when enqueued. */
   private readonly containers = new Map<string, DriverBrowseItem[]>()
   private readonly browseTree = new Map<string, DriverBrowseItem[]>()
-  private readonly savedQueues = new Map<string, DriverBrowseItem[]>()
   private readonly playModes = new Map<string, DriverPlayMode>()
 
   constructor(options: FakeSonosDriverOptions = {}) {
@@ -392,18 +391,6 @@ export class FakeSonosDriver implements SonosDriver {
 
   async setCrossfade(zoneId: string, enabled: boolean): Promise<void> {
     this.record('setCrossfade', zoneId, enabled)
-  }
-
-  async saveQueue(zoneId: string, title: string): Promise<string> {
-    this.record('saveQueue', zoneId, title)
-    const objectId = `SQ:${this.savedQueues.size + 90}`
-    this.savedQueues.set(objectId, [...this.groupFor(zoneId).queue])
-    return objectId
-  }
-
-  async removeSavedQueue(objectId: string): Promise<void> {
-    this.record('removeSavedQueue', objectId)
-    this.savedQueues.delete(objectId)
   }
 
   playModeOf(zoneId: string): DriverPlayMode | undefined {

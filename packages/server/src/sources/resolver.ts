@@ -294,16 +294,20 @@ export class SourceResolver {
       )
     }
 
-    let savedQueueId: string | undefined
     try {
-      // When the caller says the queue is expendable — activation, where this
-      // zone is about to be cleared and refilled anyway — skip the snapshot
-      // entirely. Saving and restoring a queue we're about to destroy is pure
-      // latency in front of a button press.
+      // Never borrow a zone that has a queue unless the caller owns it.
+      //
+      // This used to snapshot the queue into a Sonos playlist and restore it
+      // afterwards, which meant creating playlists in someone's household as a
+      // side effect of resolving a source — and leaving them behind whenever the
+      // process died mid-expansion. Nothing should add playlists to a user's
+      // system uninvited, so an occupied queue simply disqualifies the zone.
       if (!override?.queueIsExpendable) {
         const existing = await this.driver.getQueue(zoneId)
         if (existing.length > 0) {
-          savedQueueId = await this.driver.saveQueue(zoneId, `Domovoi restore ${Date.now()}`)
+          return containerOnly(
+            'No speaker with an empty queue was free to expand this source, so it can only be played whole.',
+          )
         }
       }
 
@@ -354,21 +358,13 @@ export class SourceResolver {
         'Sonos would not expand this source into tracks, so it can only be played whole.',
       )
     } finally {
-      // Always put a borrowed speaker back, even if expansion threw. An
-      // expendable queue is the caller's to deal with.
-      if (!override?.queueIsExpendable) await this.restoreQueue(zoneId, savedQueueId)
-    }
-  }
-
-  private async restoreQueue(zoneId: string, savedQueueId: string | undefined) {
-    try {
-      await this.driver.clearQueue(zoneId)
-      if (savedQueueId) {
-        await this.driver.addUrisToQueue(zoneId, [{ uri: savedQueueId }])
-        await this.driver.removeSavedQueue(savedQueueId)
+      // The zone we borrowed had an empty queue, so leaving it empty is putting
+      // it back exactly as we found it. An expendable queue is the caller's.
+      if (!override?.queueIsExpendable) {
+        await this.driver.clearQueue(zoneId).catch((err) => {
+          this.logger.error({ err, zoneId }, 'failed to clear borrowed queue')
+        })
       }
-    } catch (err) {
-      this.logger.error({ err, zoneId, savedQueueId }, 'failed to restore borrowed queue')
     }
   }
 

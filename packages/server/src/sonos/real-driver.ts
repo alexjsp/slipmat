@@ -24,10 +24,10 @@ import { UnknownZoneError } from './errors.js'
 import { encodeTrackUri, encodeXml, soapEnvelope } from './soap.js'
 import { formatDuration, parseDuration } from './time.js'
 
+import { classifyPlaybackKind, followUriFor, queueUriFor } from './uris.js'
+
 /** Sonos returns at most this many Browse results regardless of what we ask. */
 const QUEUE_PAGE_SIZE = 1000
-
-import { classifyPlaybackKind, followUriFor, queueUriFor } from './uris.js'
 
 /** UPnP subscriptions last ~10 minutes; renew comfortably inside that. */
 const SUBSCRIPTION_CHECK_MS = 4 * 60 * 1000
@@ -254,9 +254,19 @@ export class RealSonosDriver implements SonosDriver {
     }
     if (data.CurrentTrackMetaData !== undefined) {
       patch.currentTrack = this.toDriverTrack(uuid, data.CurrentTrackMetaData, data.CurrentTrackURI)
-      // A new track resets position; the next poll refines it.
-      patch.positionSeconds = 0
-      patch.positionUpdatedAt = Date.now()
+
+      // Only a *different* track resets the position. Sonos re-sends the
+      // current track's metadata on any transport change, pausing included, so
+      // resetting whenever metadata arrives sent the seek bar back to 0:00
+      // every time playback was paused — and polling stops while paused, so
+      // nothing corrected it.
+      const previousUri = this.deviceState.get(uuid)?.currentTrackUri ?? null
+      const nextUri =
+        data.CurrentTrackURI !== undefined ? data.CurrentTrackURI || null : previousUri
+      if (nextUri !== previousUri) {
+        patch.positionSeconds = 0
+        patch.positionUpdatedAt = Date.now()
+      }
     }
 
     this.patch(uuid, patch)
@@ -795,21 +805,6 @@ export class RealSonosDriver implements SonosDriver {
       InstanceID: 0,
       CrossfadeMode: enabled,
     })
-  }
-
-  async saveQueue(zoneId: string, title: string): Promise<string> {
-    const response = await this.coordinatorFor(zoneId).AVTransportService.SaveQueue({
-      InstanceID: 0,
-      Title: title,
-      ObjectID: '',
-    })
-    return response.AssignedObjectID
-  }
-
-  async removeSavedQueue(objectId: string): Promise<void> {
-    const device = this.manager?.Devices[0]
-    if (!device) return
-    await device.ContentDirectoryService.DestroyObject({ ObjectID: objectId })
   }
 
   async fetchArt(
