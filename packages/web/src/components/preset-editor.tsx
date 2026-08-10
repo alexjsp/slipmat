@@ -1,7 +1,12 @@
 import type { Preset, PresetInput, Zone } from '@slipmat/shared'
 import { Check, Copy, GripVertical, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { RuleEditor } from '@/components/rule-editor'
+import {
+  type DraftRule,
+  nextRuleKey,
+  RuleEditor,
+  type RulesResponse,
+} from '@/components/rule-editor'
 import { SourcePicker } from '@/components/source-picker'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -16,6 +21,7 @@ import {
 } from '@/components/ui/sheet'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
+import { getJson, saveRules } from '@/lib/api'
 import { usePresetMutations, webhookUrl } from '@/lib/presets'
 import { useHomeKit } from '@/lib/use-homekit'
 import { cn } from '@/lib/utils'
@@ -75,6 +81,9 @@ export function PresetEditor({
   zones: Zone[]
 }) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(preset))
+  // Rules live here rather than inside RuleEditor so they are saved by the one
+  // Save button, and so a preset can carry rules before it exists.
+  const [rules, setRules] = useState<DraftRule[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -83,9 +92,34 @@ export function PresetEditor({
 
   // Re-seed whenever a different preset is opened.
   useEffect(() => {
-    if (open) {
-      setDraft(draftFrom(preset))
-      setError(null)
+    if (!open) return
+    setDraft(draftFrom(preset))
+    setError(null)
+    if (!preset) {
+      setRules([])
+      return
+    }
+    let cancelled = false
+    getJson<RulesResponse>(`/api/presets/${preset.id}/rules`)
+      .then((data) => {
+        if (cancelled) return
+        setRules(
+          data.rules.map((rule) => ({
+            key: nextRuleKey(),
+            label: rule.label,
+            enabled: rule.enabled,
+            condition: rule.condition,
+            effect: rule.effect,
+          })),
+        )
+      })
+      .catch(() => {
+        // The preset is still editable without its rules; saving would wipe
+        // them, so say so rather than quietly presenting an empty list.
+        if (!cancelled) setError('Existing rules could not be loaded — saving would remove them.')
+      })
+    return () => {
+      cancelled = true
     }
   }, [open, preset])
 
@@ -113,11 +147,17 @@ export function PresetEditor({
   const save = async () => {
     setError(null)
     try {
-      if (preset) {
-        await mutations.update.mutateAsync({ id: preset.id, input: draft })
-      } else {
-        await mutations.create.mutateAsync(draft)
-      }
+      // Rules are saved after the preset, because a new one has no id to hang
+      // them off until it exists.
+      const saved = preset
+        ? await mutations.update.mutateAsync({ id: preset.id, input: draft })
+        : await mutations.create.mutateAsync(draft)
+      const id = preset?.id ?? saved?.preset.id
+      if (id)
+        await saveRules(
+          id,
+          rules.map(({ key, ...rule }) => rule),
+        )
       onOpenChange(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save this preset')
@@ -135,6 +175,12 @@ export function PresetEditor({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="bottom"
+          // A half-built preset is real work — several speakers, their volumes,
+          // a source list, maybe a rule or two — and none of it is saved until
+          // Save. A stray tap on the overlay is far too cheap a way to lose it,
+          // and on a phone the overlay is most of the screen. Cancel and Save
+          // are both right there; closing is left to them and to Escape.
+          onInteractOutside={(event) => event.preventDefault()}
           className="max-h-[92dvh] overflow-y-auto overflow-x-hidden sm:mx-auto sm:max-w-2xl sm:rounded-t-xl sm:border-x"
         >
           <SheetHeader>
@@ -304,11 +350,9 @@ export function PresetEditor({
               )}
             </section>
 
-            {preset && (
-              <div className="border-t pt-6">
-                <RuleEditor presetId={preset.id} />
-              </div>
-            )}
+            <div className="border-t pt-6">
+              <RuleEditor rules={rules} onChange={setRules} presetId={preset?.id} />
+            </div>
 
             {preset && (
               <section className="flex flex-col gap-2">

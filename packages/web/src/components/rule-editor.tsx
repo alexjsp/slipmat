@@ -23,12 +23,13 @@ const DAYS = [
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-type RulesResponse = { rules: PresetRule[]; preview: EffectivePreset }
+export type RulesResponse = { rules: PresetRule[]; preview: EffectivePreset }
 
-type DraftRule = PresetRuleInput & { key: string }
+export type DraftRule = PresetRuleInput & { key: string }
 
 let keyCounter = 0
-const nextKey = () => `rule-${keyCounter++}`
+export const nextRuleKey = () => `rule-${keyCounter++}`
+const nextKey = nextRuleKey
 
 /**
  * Rules make one preset behave differently depending on when it's fired.
@@ -37,50 +38,27 @@ const nextKey = () => `rule-${keyCounter++}`
  * only observable by waiting for the right day, which is a miserable way to
  * find out you got a condition backwards.
  */
-export function RuleEditor({ presetId }: { presetId: string }) {
-  const queryClient = useQueryClient()
-  // Rules are deletable, so an index key would hand one rule's React state to
-  // its neighbour on removal. Each draft carries a stable client-side key.
-  const [draft, setDraft] = useState<DraftRule[] | null>(null)
+export function RuleEditor({
+  rules: draft,
+  onChange: setDraft,
+  presetId,
+}: {
+  rules: DraftRule[]
+  onChange: (rules: DraftRule[]) => void
+  /** Absent while the preset is still being created; enables the preview. */
+  presetId?: string | undefined
+}) {
   const [pickerFor, setPickerFor] = useState<{ index: number; mode: 'add' | 'replace' } | null>(
     null,
   )
 
+  // Only the preview is fetched here. The rules themselves belong to the form
+  // above, so they are saved with everything else rather than on their own.
   const query = useQuery({
     queryKey: ['rules', presetId],
     queryFn: async () => getJson<RulesResponse>(`/api/presets/${presetId}/rules`),
+    enabled: presetId !== undefined,
   })
-
-  useEffect(() => {
-    if (query.data && draft === null) {
-      setDraft(
-        query.data.rules.map((rule) => ({
-          key: nextKey(),
-          label: rule.label,
-          enabled: rule.enabled,
-          condition: rule.condition,
-          effect: rule.effect,
-        })),
-      )
-    }
-  }, [query.data, draft])
-
-  const save = useMutation({
-    mutationFn: async (rules: PresetRuleInput[]) => {
-      const res = await fetch(`/api/presets/${presetId}/rules`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ rules }),
-      })
-      if (!res.ok) throw new Error('Could not save rules')
-      return (await res.json()) as RulesResponse
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(['rules', presetId], data)
-    },
-  })
-
-  if (!draft) return <p className="text-muted-foreground text-sm">Loading rules…</p>
 
   const patch = (index: number, changes: Partial<DraftRule>) =>
     setDraft(draft.map((rule, i) => (i === index ? { ...rule, ...changes } : rule)))
@@ -322,15 +300,6 @@ export function RuleEditor({ presetId }: { presetId: string }) {
           </div>
         </div>
       ))}
-
-      <Button
-        size="sm"
-        className="self-start"
-        disabled={save.isPending}
-        onClick={() => save.mutate(draft.map(({ key, ...rule }) => rule))}
-      >
-        {save.isPending ? 'Saving…' : 'Save rules'}
-      </Button>
 
       <SourcePicker
         open={pickerFor !== null}
