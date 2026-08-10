@@ -44,7 +44,7 @@ export function GroupSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto">
+      <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto overflow-x-hidden">
         <SheetHeader>
           <SheetTitle>{members.map((zone) => zone.name).join(' + ')}</SheetTitle>
           <SheetDescription>Set each speaker's volume, or add and remove rooms.</SheetDescription>

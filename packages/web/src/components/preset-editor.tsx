@@ -125,7 +125,7 @@ export function PresetEditor({
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="max-h-[92dvh] overflow-y-auto">
+        <SheetContent side="bottom" className="max-h-[92dvh] overflow-y-auto overflow-x-hidden">
           <SheetHeader>
             <SheetTitle>{preset ? 'Edit preset' : 'New preset'}</SheetTitle>
             <SheetDescription>
@@ -192,23 +192,27 @@ export function PresetEditor({
                       )}
                     </div>
                     {selected && (
-                      <Slider
-                        value={[selected.volume]}
-                        min={0}
-                        max={100}
-                        step={1}
-                        aria-label={`${zone.name} volume`}
-                        className="ml-7"
-                        onValueChange={([value]) =>
-                          patch({
-                            zones: draft.zones.map((entry) =>
-                              entry.zoneId === zone.id
-                                ? { ...entry, volume: value ?? entry.volume }
-                                : entry,
-                            ),
-                          })
-                        }
-                      />
+                      // Indent with padding on a wrapper, not a margin on the
+                      // slider: the slider is w-full, so a margin makes it wider
+                      // than its parent and the whole sheet scrolls sideways.
+                      <div className="pl-7">
+                        <Slider
+                          value={[selected.volume]}
+                          min={0}
+                          max={100}
+                          step={1}
+                          aria-label={`${zone.name} volume`}
+                          onValueChange={([value]) =>
+                            patch({
+                              zones: draft.zones.map((entry) =>
+                                entry.zoneId === zone.id
+                                  ? { ...entry, volume: value ?? entry.volume }
+                                  : entry,
+                              ),
+                            })
+                          }
+                        />
+                      </div>
                     )}
                   </div>
                 )

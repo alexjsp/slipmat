@@ -130,7 +130,7 @@ export function RuleEditor({ presetId }: { presetId: string }) {
             <Input
               value={rule.label}
               onChange={(event) => patch(index, { label: event.target.value })}
-              className="h-8"
+              className="h-8 min-w-0"
             />
             <Switch
               checked={rule.enabled}
@@ -213,7 +213,7 @@ export function RuleEditor({ presetId }: { presetId: string }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Checkbox
               id={`time-${index}`}
               checked={!!rule.condition.timeOfDay}
@@ -233,7 +233,7 @@ export function RuleEditor({ presetId }: { presetId: string }) {
               type="time"
               disabled={!rule.condition.timeOfDay}
               value={rule.condition.timeOfDay?.from ?? '21:00'}
-              className="h-8 w-28"
+              className="h-8 w-28 shrink-0"
               onChange={(event) =>
                 patch(index, {
                   condition: {
@@ -251,7 +251,7 @@ export function RuleEditor({ presetId }: { presetId: string }) {
               type="time"
               disabled={!rule.condition.timeOfDay}
               value={rule.condition.timeOfDay?.to ?? '05:00'}
-              className="h-8 w-28"
+              className="h-8 w-28 shrink-0"
               onChange={(event) =>
                 patch(index, {
                   condition: {
@@ -297,7 +297,7 @@ export function RuleEditor({ presetId }: { presetId: string }) {
               </p>
             ))}
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Label htmlFor={`vol-${index}`} className="text-xs">
                 Volume change
               </Label>
