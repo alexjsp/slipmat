@@ -6,7 +6,7 @@ import { PlayMode } from '@svrooij/sonos/lib/models/playmode.js'
 import type { ZoneGroup } from '@svrooij/sonos/lib/models/zone-group.js'
 import type { AVTransportServiceEvent } from '@svrooij/sonos/lib/services/index.js'
 import type { Logger } from '../logger.js'
-import { isContainerClass, parseDidl } from './didl.js'
+import { asMetadataDocument, isContainerClass, parseDidl } from './didl.js'
 import type {
   DriverBrowseItem,
   DriverBrowseResult,
@@ -31,9 +31,6 @@ const TOPOLOGY_REFRESH_MS = 60 * 1000
 const POSITION_POLL_MS = 5 * 1000
 /** Grouping is eventually consistent — how long we wait for topology to settle. */
 const TOPOLOGY_SETTLE_TIMEOUT_MS = 5000
-/** AddMultipleURIsToQueue rejects payloads larger than this. */
-const ADD_BATCH_SIZE = 16
-
 const PLAY_MODES: Record<DriverPlayMode, PlayMode> = {
   NORMAL: PlayMode.Normal,
   REPEAT_ALL: PlayMode.RepeatAll,
@@ -616,9 +613,36 @@ export class RealSonosDriver implements SonosDriver {
 
   async getQueue(zoneId: string): Promise<DriverBrowseItem[]> {
     const device = this.coordinatorFor(zoneId)
-    const response = await device.GetQueue()
-    const tracks: SonosTrack[] = typeof response.Result === 'string' ? [] : response.Result
-    return tracks.map((track) => toBrowseItem(track, device.Host))
+
+    // Raw DIDL, for the same reason as browse(): the library's parser
+    // percent-decodes <res>, turning `librarytrack%3aa.123` into
+    // `librarytrack:a.123`. Sonos then rejects that URI when it is handed back,
+    // so a queue read through the parsed path yields tracks that cannot be
+    // re-enqueued.
+    const response = await device.ContentDirectoryService.Browse({
+      ObjectID: 'Q:0',
+      BrowseFlag: 'BrowseDirectChildren',
+      Filter: '*',
+      StartingIndex: 0,
+      RequestedCount: 1000,
+      SortCriteria: '',
+    })
+
+    const entries = parseDidl(typeof response.Result === 'string' ? response.Result : '')
+    return entries.map((entry) => ({
+      id: entry.id,
+      title: entry.title || 'Unknown',
+      subtitle: entry.creator ?? entry.album ?? null,
+      album: entry.album,
+      artUrl: entry.albumArtUri
+        ? new URL(entry.albumArtUri, `http://${device.Host}:1400`).toString()
+        : null,
+      isContainer: isContainerClass(entry.upnpClass),
+      uri: entry.res,
+      // A queue entry has no resMD; its own element is the metadata, and
+      // without it a re-enqueued track plays with no title or artist.
+      metadata: entry.resMD ?? asMetadataDocument(entry.raw),
+    }))
   }
 
   async clearQueue(zoneId: string): Promise<void> {
@@ -631,38 +655,22 @@ export class RealSonosDriver implements SonosDriver {
   ): Promise<void> {
     const device = this.coordinatorFor(zoneId)
 
-    // AddMultipleURIsToQueue only accepts individual track URIs — handing it a
-    // container gets a UPnP 402. Containers have to go through the single-item
-    // call, which is what makes Sonos expand them.
-    const containers = items.filter((item) => isContainerUri(item.uri))
-    for (const container of containers) {
+    // One call per item rather than AddMultipleURIsToQueue.
+    //
+    // The batch call rejects streaming-service track URIs with UPnP 402 in
+    // every form tried against a real household — escaped and unescaped URIs,
+    // merged DIDL and empty metadata alike — while the single-item call accepts
+    // them happily. It is also fast enough not to need batching: measured at
+    // roughly 10ms per track, so the twenty-track head of a preset costs about
+    // 200ms, well inside the fast-start budget.
+    for (const item of items) {
       await device.AVTransportService.AddURIToQueue({
         InstanceID: 0,
-        EnqueuedURI: container.uri,
-        // An object here is serialised *and XML-encoded* by the transport; a
-        // string is inserted verbatim and must already be encoded. Passing a
-        // hand-stringified DIDL gets UPnP 402, which is why the object form
-        // wins when we have it.
-        EnqueuedURIMetaData: (container.metadataObject as SonosTrack) ?? container.metadata ?? '',
-        DesiredFirstTrackNumberEnqueued: 0,
-        EnqueueAsNext: false,
-      })
-    }
-    items = items.filter((item) => !isContainerUri(item.uri))
-    if (items.length === 0) return
-    // AddMultipleURIsToQueue takes at most ~16 URIs per SOAP call, so a large
-    // preset is dozens of sequential round-trips. Callers enqueue a small head,
-    // start playback, then append the rest in the background.
-    for (let index = 0; index < items.length; index += ADD_BATCH_SIZE) {
-      const batch = items.slice(index, index + ADD_BATCH_SIZE)
-      await device.AVTransportService.AddMultipleURIsToQueue({
-        InstanceID: 0,
-        UpdateID: 0,
-        NumberOfURIs: batch.length,
-        EnqueuedURIs: batch.map((item) => item.uri).join(' '),
-        EnqueuedURIsMetaData: batch.map((item) => item.metadata ?? '').join(' '),
-        ContainerURI: '',
-        ContainerMetaData: '',
+        EnqueuedURI: item.uri,
+        // An object is serialised and XML-encoded by the transport; a string is
+        // inserted verbatim and must already be encoded. Favourites give us the
+        // latter, pasted links the former.
+        EnqueuedURIMetaData: (item.metadataObject as SonosTrack) ?? item.metadata ?? '',
         DesiredFirstTrackNumberEnqueued: 0,
         EnqueueAsNext: false,
       })
@@ -728,27 +736,4 @@ export class RealSonosDriver implements SonosDriver {
       contentType: response.headers.get('content-type') ?? 'image/jpeg',
     }
   }
-}
-
-/** Map a parsed DIDL entry onto our transport-agnostic browse item. */
-function toBrowseItem(track: SonosTrack, host: string): DriverBrowseItem {
-  const upnpClass = track.UpnpClass ?? ''
-  const art = track.AlbumArtUri
-  return {
-    id: track.ItemId ?? track.TrackUri ?? '',
-    title: track.Title ?? 'Unknown',
-    subtitle: track.Artist ?? track.Album ?? null,
-    album: track.Album ?? null,
-    artUrl: art ? new URL(art, `http://${host}:1400`).toString() : null,
-    isContainer: upnpClass.startsWith('object.container'),
-    uri: track.TrackUri ?? null,
-    metadata: MetaDataHelper.TrackToMetaData(track, true, track.CdUdn),
-  }
-}
-
-/** Containers are expanded by Sonos; individual tracks are not. */
-function isContainerUri(uri: string): boolean {
-  return (
-    uri.startsWith('x-rincon-cpcontainer:') || uri.startsWith('file:///jffs/settings/savedqueues')
-  )
 }

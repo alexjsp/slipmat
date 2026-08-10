@@ -335,17 +335,38 @@ export class SourceResolver {
     }
   }
 
-  /** Prefer a configured utility zone, else any stopped zone with no queue. */
+  /**
+   * Pick a zone whose queue we may borrow.
+   *
+   * A configured utility zone is a *preference*, not an override: borrowing
+   * clears the queue, so handing back a zone that is currently playing wipes
+   * whatever someone is listening to. That happened in practice — a background
+   * refresh emptied the queue of the very speaker mid-song — so the busy check
+   * applies to the configured zone too.
+   */
   private async pickUtilityZone(): Promise<string | undefined> {
     const snapshot = this.driver.snapshot()
-    if (this.utilityZoneId) return this.utilityZoneId
+
+    const isFree = async (zoneId: string): Promise<boolean> => {
+      const zone = snapshot.zones.find((entry) => entry.id === zoneId)
+      if (!zone || zone.unreachable) return false
+      const group = snapshot.groups.find((entry) => entry.memberZoneIds.includes(zoneId))
+      if (group && group.transportState !== 'STOPPED') return false
+      const queue = await this.driver.getQueue(zoneId)
+      return queue.length === 0
+    }
+
+    if (this.utilityZoneId) {
+      if (await isFree(this.utilityZoneId)) return this.utilityZoneId
+      this.logger.info(
+        { zoneId: this.utilityZoneId },
+        'configured utility zone is busy; looking for another',
+      )
+    }
 
     for (const group of snapshot.groups) {
-      if (group.transportState === 'PLAYING' || group.transportState === 'TRANSITIONING') continue
-      const zone = snapshot.zones.find((z) => z.id === group.coordinatorZoneId)
-      if (!zone || zone.unreachable) continue
-      const queue = await this.driver.getQueue(zone.id)
-      if (queue.length === 0) return zone.id
+      if (group.coordinatorZoneId === this.utilityZoneId) continue
+      if (await isFree(group.coordinatorZoneId)) return group.coordinatorZoneId
     }
     return undefined
   }

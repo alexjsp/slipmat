@@ -23,6 +23,15 @@ export type DidlEntry = {
   creator: string | null
   album: string | null
   /**
+   * The entry's own `<item>`/`<container>` element, verbatim.
+   *
+   * A favourite points at something else and carries `r:resMD` for it, but a
+   * queue entry has no resMD — it *is* the metadata. Re-enqueueing a queue
+   * track without this gives Sonos a URI and no title, so the track plays but
+   * shows up blank everywhere.
+   */
+  raw: string
+  /**
    * The `r:resMD` block, left XML-entity encoded. The SOAP layer inserts a
    * string `…MetaData` value verbatim, so it has to arrive already encoded —
    * decoding it here produces a UPnP 402.
@@ -64,6 +73,7 @@ export function parseDidl(encoded: string): DidlEntry[] {
     const rawResMD = tagContent(body, 'r:resMD')
 
     entries.push({
+      raw: match[0],
       id: attribute(attrs, 'id') ?? '',
       parentId: attribute(attrs, 'parentID'),
       title: decodeEntities(tagContent(body, 'dc:title') ?? ''),
@@ -87,3 +97,25 @@ export function isContainerClass(upnpClass: string | null): boolean {
   if (!upnpClass) return false
   return upnpClass.startsWith('object.container')
 }
+
+/**
+ * Wrap a single DIDL element as a standalone document, XML-escaped ready to be
+ * handed straight back to Sonos.
+ *
+ * The SOAP layer inserts a string metadata value verbatim, so it has to arrive
+ * escaped — an unescaped one is rejected as UPnP 402.
+ */
+export function asMetadataDocument(rawElement: string): string {
+  const document = `${DIDL_OPEN}${rawElement}</DIDL-Lite>`
+  return document
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+
+const DIDL_OPEN =
+  '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/"' +
+  ' xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"' +
+  ' xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/"' +
+  ' xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'

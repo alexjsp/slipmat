@@ -126,6 +126,31 @@ describe('SourceResolver', () => {
     expect(result.warning).toMatch(/cannot be mixed/)
   })
 
+  it('never borrows the configured utility zone while it is playing', async () => {
+    // This actually happened: a background refresh wiped the queue of the
+    // speaker that was mid-song, because a configured zone skipped the check.
+    const containerUri =
+      'x-rincon-cpcontainer:1006206cspotify%3aplaylist%3a37i9dQZF1DXcBWIGoYBM5M?sid=9&flags=8300&sn=7'
+    driver.setContainerContents(containerUri, [track('x-sonos-spotify:one', 'One')])
+    driver.setPlaying('RINCON_KITCHEN01400', 'x-rincon-queue:k#0', 'someones-music')
+
+    const pinned = new SourceResolver({
+      driver,
+      logger,
+      allowScratchQueueExpansion: true,
+      utilityZoneId: 'RINCON_KITCHEN01400',
+    })
+    await pinned.resolve({
+      kind: 'service_url',
+      ref: 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M',
+    })
+
+    const clearedKitchen = driver.calls.some(
+      (call) => call.method === 'clearQueue' && call.args[0] === 'RINCON_KITCHEN01400',
+    )
+    expect(clearedKitchen).toBe(false)
+  })
+
   it('never borrows a speaker that is playing', async () => {
     // Occupy every zone, so no utility zone is available.
     for (const zone of driver.snapshot().zones) {
