@@ -8,6 +8,12 @@ DEPLOY_HOST="${DEPLOY_HOST:-root@unraid.jsp.scot}"
 DEPLOY_PATH="${DEPLOY_PATH:-/mnt/user/appdata/slipmat_source}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yml}"
 DEPLOY_PROJECT_NAME="${DEPLOY_PROJECT_NAME:-slipmat}"
+# Must match the bind mount in compose.yml, and the uid/gid in the Dockerfile.
+# A bind mount shadows the image's own /data, ownership included, so the host
+# directory has to be given to the container's user or SQLite cannot open the
+# database and the container crash-loops on SQLITE_CANTOPEN.
+DATA_PATH="${DATA_PATH:-/mnt/user/appdata/slipmat}"
+DATA_OWNER="${DATA_OWNER:-10001:10001}"
 RSYNC_RSH="${RSYNC_RSH:-ssh}"
 RSYNC_FLAGS="${RSYNC_FLAGS:--az}"
 
@@ -25,7 +31,7 @@ SYNC_PATHS=(
 echo "Deploying Slipmat to ${DEPLOY_HOST}:${DEPLOY_PATH}"
 echo "Using Compose project ${DEPLOY_PROJECT_NAME}"
 
-ssh "${DEPLOY_HOST}" "mkdir -p '${DEPLOY_PATH}'"
+ssh "${DEPLOY_HOST}" "mkdir -p '${DEPLOY_PATH}' '${DATA_PATH}' && chown '${DATA_OWNER}' '${DATA_PATH}'"
 
 (
   cd "${ROOT_DIR}"

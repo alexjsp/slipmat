@@ -40,7 +40,13 @@ ENV SLIPMAT_DATA_DIR=/data
 ENV SLIPMAT_VERSION=${SLIPMAT_VERSION}
 WORKDIR /app
 
-RUN useradd --system --uid 10001 --create-home slipmat \
+# Both ids are pinned, not left to useradd. A bind-mounted /data shadows the
+# ownership set below, so whoever prepares the host directory has to chown it to
+# these exact numbers — which means they cannot be allowed to drift. `useradd`
+# alone would have picked the next free gid (999 on this base image), and a base
+# image bump could silently change it.
+RUN groupadd --system --gid 10001 slipmat \
+  && useradd --system --uid 10001 --gid 10001 --create-home slipmat \
   && mkdir -p /data && chown slipmat:slipmat /data
 
 COPY --from=build --chown=slipmat:slipmat /tmp/server/node_modules ./node_modules
