@@ -55,14 +55,20 @@ export function shuffle<T>(items: readonly T[], random: () => number): T[] {
 export type BuildQueueOptions = {
   dedupe: boolean
   seed: number
+  /**
+   * Off plays each source end to end, in the order they were added to the
+   * preset — an album followed by an album, rather than interleaved.
+   */
+  shuffle: boolean
 }
 
-/** Pool every source's tracks together, optionally dedupe, then shuffle. */
 export function buildQueue(
   sources: ResolvedTrack[][],
   options: BuildQueueOptions,
 ): ResolvedTrack[] {
+  // `sources` arrives in preset order, so a plain flatten already gives the
+  // sequential reading.
   const pooled = sources.flat()
   const deduped = options.dedupe ? dedupeTracks(pooled) : pooled
-  return shuffle(deduped, createRandom(options.seed))
+  return options.shuffle ? shuffle(deduped, createRandom(options.seed)) : deduped
 }

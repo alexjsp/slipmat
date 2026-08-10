@@ -17,6 +17,8 @@ export const presetSchema = z.object({
   color: z.string().nullable(),
   zones: z.array(presetZoneSchema).min(1),
   sources: z.array(presetSourceSchema).min(1),
+  /** Off plays every source end to end, in the order they were added. */
+  shuffle: z.boolean(),
   repeatAll: z.boolean(),
   dedupe: z.boolean(),
   /** Pause every other group in the house before starting. */
@@ -53,6 +55,7 @@ export const presetInputSchema = z.object({
       }),
     )
     .min(1),
+  shuffle: z.boolean().default(true),
   repeatAll: z.boolean().default(true),
   dedupe: z.boolean().default(true),
   pauseOthers: z.boolean().default(false),

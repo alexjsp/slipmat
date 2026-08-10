@@ -105,6 +105,7 @@ export class ActivationEngine {
     // Volumes and flags come from the rule-adjusted view from here on.
     const volumeByZone = new Map(effective.zoneVolumes.map((zone) => [zone.zoneId, zone.volume]))
     const flags = {
+      shuffle: effective.shuffle,
       repeatAll: effective.repeatAll,
       crossfade: effective.crossfade,
       pauseOthers: effective.pauseOthers,
@@ -167,7 +168,11 @@ export class ActivationEngine {
 
     const pool = buildQueue(
       resolved.filter((source) => source.mode === 'tracks').map((source) => source.tracks),
-      { dedupe: preset.dedupe, seed: options.seed ?? seedFor(activationId) },
+      {
+        dedupe: preset.dedupe,
+        shuffle: flags.shuffle,
+        seed: options.seed ?? seedFor(activationId),
+      },
     )
 
     if (pool.length === 0) {

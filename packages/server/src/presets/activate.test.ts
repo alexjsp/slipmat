@@ -40,6 +40,7 @@ function presetInput(overrides: Partial<PresetInput> = {}): PresetInput {
       { zoneId: BEDROOM, volume: 15, isCoordinator: false },
     ],
     sources: [{ kind: 'sonos_playlist', ref: 'SQ:1', label: 'Jazz' }],
+    shuffle: true,
     repeatAll: true,
     dedupe: true,
     pauseOthers: false,
@@ -128,6 +129,26 @@ describe('ActivationEngine', () => {
     expect(new Set(prefixes)).toEqual(new Set(['jazz', 'rock']))
     expect([...queue].sort()).toEqual(['jazz-1', 'jazz-2', 'jazz-3', 'rock-1', 'rock-2', 'rock-3'])
     expect(prefixes).not.toEqual(['jazz', 'jazz', 'jazz', 'rock', 'rock', 'rock'])
+  })
+
+  it('plays sources in order when shuffle is off', async () => {
+    const preset = create({
+      shuffle: false,
+      sources: [
+        { kind: 'sonos_playlist', ref: 'SQ:1', label: 'Jazz' },
+        { kind: 'sonos_playlist', ref: 'SQ:2', label: 'Rock' },
+      ],
+    })
+    await engine.activate(preset)
+
+    expect(driver.queueOf(KITCHEN)).toEqual([
+      'jazz-1',
+      'jazz-2',
+      'jazz-3',
+      'rock-1',
+      'rock-2',
+      'rock-3',
+    ])
   })
 
   it('is idempotent — firing twice does not restart playback', async () => {

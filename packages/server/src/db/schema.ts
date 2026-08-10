@@ -8,6 +8,7 @@ export const presets = sqliteTable('presets', {
   name: text('name').notNull(),
   icon: text('icon'),
   color: text('color'),
+  shuffle: integer('shuffle', { mode: 'boolean' }).notNull().default(true),
   repeatAll: integer('repeat_all', { mode: 'boolean' }).notNull().default(true),
   dedupe: integer('dedupe', { mode: 'boolean' }).notNull().default(true),
   pauseOthers: integer('pause_others', { mode: 'boolean' }).notNull().default(false),

@@ -32,6 +32,7 @@ export const ruleEffectSchema = z.object({
   volumeDelta: z.number().int().min(-100).max(100).optional(),
   /** Wins over `volumeDelta` when both are set. */
   volumeAbsolute: z.number().int().min(0).max(100).optional(),
+  shuffle: z.boolean().optional(),
   repeatAll: z.boolean().optional(),
   crossfade: z.boolean().optional(),
   pauseOthers: z.boolean().optional(),
@@ -62,6 +63,7 @@ export type PresetRuleInput = z.infer<typeof presetRuleInputSchema>
 export const effectivePresetSchema = z.object({
   sources: z.array(ruleSourceSchema),
   zoneVolumes: z.array(z.object({ zoneId: z.string(), zoneName: z.string(), volume: z.number() })),
+  shuffle: z.boolean(),
   repeatAll: z.boolean(),
   crossfade: z.boolean(),
   pauseOthers: z.boolean(),

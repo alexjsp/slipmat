@@ -117,6 +117,7 @@ export function evaluateRules(preset: Preset, rules: PresetRule[], clock: Clock)
       zoneName: zone.zoneName,
       volume: zone.volume,
     })),
+    shuffle: preset.shuffle,
     repeatAll: preset.repeatAll,
     crossfade: preset.crossfade,
     pauseOthers: preset.pauseOthers,
@@ -150,6 +151,7 @@ export function evaluateRules(preset: Preset, rules: PresetRule[], clock: Clock)
         volume: clamp(zone.volume + delta),
       }))
     }
+    if (effect.shuffle !== undefined) effective.shuffle = effect.shuffle
     if (effect.repeatAll !== undefined) effective.repeatAll = effect.repeatAll
     if (effect.crossfade !== undefined) effective.crossfade = effect.crossfade
     if (effect.pauseOthers !== undefined) effective.pauseOthers = effect.pauseOthers

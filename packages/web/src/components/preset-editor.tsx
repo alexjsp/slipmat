@@ -32,6 +32,7 @@ function draftFrom(preset: Preset | null): Draft {
       color: null,
       zones: [],
       sources: [],
+      shuffle: true,
       repeatAll: true,
       dedupe: true,
       pauseOthers: false,
@@ -53,6 +54,7 @@ function draftFrom(preset: Preset | null): Draft {
       ref: source.ref,
       label: source.label,
     })),
+    shuffle: preset.shuffle,
     repeatAll: preset.repeatAll,
     dedupe: preset.dedupe,
     pauseOthers: preset.pauseOthers,
@@ -259,6 +261,13 @@ export function PresetEditor({
 
             <section className="flex flex-col gap-4">
               <h3 className="font-medium text-sm">Behaviour</h3>
+              <ToggleRow
+                id="shuffle"
+                label="Shuffle queue"
+                description="Off plays each source right through, in the order you added them."
+                checked={draft.shuffle}
+                onChange={(value) => patch({ shuffle: value })}
+              />
               <ToggleRow
                 id="repeat-all"
                 label="Repeat when the queue ends"

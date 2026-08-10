@@ -20,6 +20,7 @@ const DDL = [
     name TEXT NOT NULL,
     icon TEXT,
     color TEXT,
+    shuffle INTEGER NOT NULL DEFAULT 1,
     repeat_all INTEGER NOT NULL DEFAULT 1,
     dedupe INTEGER NOT NULL DEFAULT 1,
     pause_others INTEGER NOT NULL DEFAULT 0,
@@ -71,6 +72,7 @@ const DDL = [
   // the duplicate-column error is expected and ignored on an up-to-date db.
   `ALTER TABLE resolved_sources ADD COLUMN container_metadata_object_json TEXT`,
   `ALTER TABLE resolved_sources ADD COLUMN expensive INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE presets ADD COLUMN shuffle INTEGER NOT NULL DEFAULT 1`,
 
   `CREATE TABLE IF NOT EXISTS activations (
     id TEXT PRIMARY KEY,

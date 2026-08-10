@@ -57,7 +57,7 @@ describe('buildQueue', () => {
   const rock = [track('r1'), track('r2'), track('r3')]
 
   it('interleaves sources rather than concatenating them', () => {
-    const result = buildQueue([jazz, rock], { dedupe: true, seed: 5 })
+    const result = buildQueue([jazz, rock], { dedupe: true, shuffle: true, seed: 5 })
     expect(result).toHaveLength(6)
 
     // The whole point of the feature: the second half must not be all one source.
@@ -68,11 +68,34 @@ describe('buildQueue', () => {
   it('honours dedupe across sources', () => {
     const overlapping = [track('shared?sn=1'), track('x1')]
     const other = [track('shared?sn=2'), track('x2')]
-    expect(buildQueue([overlapping, other], { dedupe: true, seed: 1 })).toHaveLength(3)
-    expect(buildQueue([overlapping, other], { dedupe: false, seed: 1 })).toHaveLength(4)
+    expect(buildQueue([overlapping, other], { dedupe: true, shuffle: true, seed: 1 })).toHaveLength(
+      3,
+    )
+    expect(
+      buildQueue([overlapping, other], { dedupe: false, shuffle: true, seed: 1 }),
+    ).toHaveLength(4)
+  })
+
+  it('plays sources end to end, in preset order, when shuffle is off', () => {
+    const result = buildQueue([jazz, rock], { dedupe: true, shuffle: false, seed: 5 })
+    expect(result.map((t) => t.uri)).toEqual(['j1', 'j2', 'j3', 'r1', 'r2', 'r3'])
+  })
+
+  it('still dedupes with shuffle off, without disturbing the order', () => {
+    const a = [track('x'), track('y')]
+    const b = [track('y'), track('z')]
+    expect(buildQueue([a, b], { dedupe: true, shuffle: false, seed: 1 }).map((t) => t.uri)).toEqual(
+      ['x', 'y', 'z'],
+    )
+  })
+
+  it('ignores the seed entirely when shuffle is off', () => {
+    const first = buildQueue([jazz, rock], { dedupe: true, shuffle: false, seed: 1 })
+    const second = buildQueue([jazz, rock], { dedupe: true, shuffle: false, seed: 999 })
+    expect(first.map((t) => t.uri)).toEqual(second.map((t) => t.uri))
   })
 
   it('handles an empty source without dropping the others', () => {
-    expect(buildQueue([jazz, [], rock], { dedupe: true, seed: 2 })).toHaveLength(6)
+    expect(buildQueue([jazz, [], rock], { dedupe: true, shuffle: true, seed: 2 })).toHaveLength(6)
   })
 })

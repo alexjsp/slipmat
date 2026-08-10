@@ -32,6 +32,7 @@ const basePreset = {
       resolveError: null,
     },
   ],
+  shuffle: true,
   repeatAll: true,
   dedupe: true,
   pauseOthers: false,
@@ -250,14 +251,16 @@ describe('evaluateRules', () => {
     ])
   })
 
-  it('overrides flags', () => {
+  it('overrides flags, including shuffle', () => {
     const result = evaluateRules(
       basePreset,
-      [rule({ effect: { repeatAll: false, pauseOthers: true } })],
+      [rule({ effect: { repeatAll: false, pauseOthers: true, shuffle: false } })],
       clock(),
     )
     expect(result.repeatAll).toBe(false)
     expect(result.pauseOthers).toBe(true)
+    // e.g. "in December, play the Christmas album straight through".
+    expect(result.shuffle).toBe(false)
   })
 })
 
