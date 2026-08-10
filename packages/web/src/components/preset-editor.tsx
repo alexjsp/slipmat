@@ -43,6 +43,7 @@ function draftFrom(preset: Preset | null): Draft {
       dedupe: true,
       pauseOthers: false,
       crossfade: false,
+      shrink: null,
       homekitEnabled: false,
     }
   }
@@ -65,6 +66,7 @@ function draftFrom(preset: Preset | null): Draft {
     dedupe: preset.dedupe,
     pauseOthers: preset.pauseOthers,
     crossfade: preset.crossfade,
+    shrink: preset.shrink,
     homekitEnabled: preset.homekitEnabled,
   }
 }
@@ -125,6 +127,26 @@ export function PresetEditor({
 
   const patch = (changes: Partial<Draft>) => setDraft((current) => ({ ...current, ...changes }))
 
+  // Keep the wind-down list honest as speakers are ticked and unticked. The
+  // coordinator moves when you untick the first speaker, and a keep list that
+  // has lost its coordinator — or names a speaker no longer in the preset — is
+  // rejected on save, which is a poor way to find out.
+  useEffect(() => {
+    const shrink = draft.shrink
+    if (!shrink) return
+    const zoneIds = new Set(draft.zones.map((zone) => zone.zoneId))
+    const coordinator = draft.zones.find((zone) => zone.isCoordinator)?.zoneId
+    const kept = shrink.keepZoneIds.filter((zoneId) => zoneIds.has(zoneId))
+    const next = coordinator && !kept.includes(coordinator) ? [coordinator, ...kept] : kept
+    const unchanged =
+      next.length === shrink.keepZoneIds.length &&
+      next.every((zoneId, index) => zoneId === shrink.keepZoneIds[index])
+    if (unchanged) return
+    setDraft((current) =>
+      current.shrink ? { ...current, shrink: { ...current.shrink, keepZoneIds: next } } : current,
+    )
+  }, [draft.zones, draft.shrink])
+
   const toggleZone = (zoneId: string, selected: boolean) => {
     setDraft((current) => {
       const zones = selected
@@ -142,7 +164,16 @@ export function PresetEditor({
     })
   }
 
-  const canSave = draft.name.trim() !== '' && draft.zones.length > 0 && draft.sources.length > 0
+  const coordinatorZoneId = draft.zones.find((zone) => zone.isCoordinator)?.zoneId
+  const allZonesKept =
+    draft.shrink !== null && draft.shrink.keepZoneIds.length >= draft.zones.length
+
+  const canSave =
+    draft.name.trim() !== '' &&
+    draft.zones.length > 0 &&
+    draft.sources.length > 0 &&
+    // The server rejects these too; blocking Save says so before a round trip.
+    !allZonesKept
 
   const save = async () => {
     setError(null)
@@ -347,6 +378,99 @@ export function PresetEditor({
                   checked={draft.homekitEnabled}
                   onChange={(value) => patch({ homekitEnabled: value })}
                 />
+              )}
+            </section>
+
+            <section className="flex flex-col gap-3 border-t pt-6">
+              <ToggleRow
+                id="shrink"
+                label="Wind down to fewer speakers"
+                description="Start everywhere, then keep playing in just some rooms."
+                checked={draft.shrink !== null}
+                onChange={(value) =>
+                  patch({
+                    // Defaults to the speaker holding the queue, which is the
+                    // only one that can carry on alone.
+                    shrink: value
+                      ? {
+                          afterMinutes: 30,
+                          keepZoneIds: coordinatorZoneId ? [coordinatorZoneId] : [],
+                        }
+                      : null,
+                  })
+                }
+              />
+
+              {draft.shrink && (
+                <div className="flex flex-col gap-3 pl-1">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="shrink-minutes" className="shrink-0">
+                      After
+                    </Label>
+                    <Input
+                      id="shrink-minutes"
+                      type="number"
+                      min={1}
+                      max={1440}
+                      className="w-20"
+                      value={draft.shrink.afterMinutes}
+                      onChange={(event) =>
+                        patch({
+                          shrink: draft.shrink
+                            ? {
+                                ...draft.shrink,
+                                afterMinutes: Number(event.target.value) || 1,
+                              }
+                            : null,
+                        })
+                      }
+                    />
+                    <span className="text-muted-foreground text-sm">minutes, keep playing in</span>
+                  </div>
+
+                  {draft.zones.length === 0 ? (
+                    <p className="text-muted-foreground text-xs">Pick some speakers first.</p>
+                  ) : (
+                    draft.zones.map((entry) => {
+                      const zone = zones.find((z) => z.id === entry.zoneId)
+                      const kept = draft.shrink?.keepZoneIds.includes(entry.zoneId) ?? false
+                      // The coordinator holds the queue: drop it and the rooms
+                      // you kept fall silent, so it is not up for debate.
+                      const locked = entry.isCoordinator
+                      return (
+                        <div key={entry.zoneId} className="flex items-center gap-3">
+                          <Checkbox
+                            id={`keep-${entry.zoneId}`}
+                            checked={kept || locked}
+                            disabled={locked}
+                            onCheckedChange={(checked) => {
+                              const current = draft.shrink
+                              if (!current) return
+                              const next =
+                                checked === true
+                                  ? [...current.keepZoneIds, entry.zoneId]
+                                  : current.keepZoneIds.filter((id) => id !== entry.zoneId)
+                              patch({ shrink: { ...current, keepZoneIds: next } })
+                            }}
+                          />
+                          <label htmlFor={`keep-${entry.zoneId}`} className="flex-1 text-sm">
+                            {zone?.name ?? entry.zoneId}
+                            {locked && (
+                              <span className="ml-2 text-muted-foreground text-xs">
+                                holds the queue — always kept
+                              </span>
+                            )}
+                          </label>
+                        </div>
+                      )
+                    })
+                  )}
+                  {allZonesKept && (
+                    <p className="text-muted-foreground text-xs">
+                      Keeping every speaker leaves nothing to drop.
+                    </p>
+                  )}
+                </div>
               )}
             </section>
 

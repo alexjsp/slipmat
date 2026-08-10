@@ -6,7 +6,7 @@ import type { PresetRepository } from '../presets/repository.js'
 import { clockFrom } from '../presets/rules.js'
 import type { SonosDriver } from '../sonos/driver.js'
 import type { SystemStateStore } from '../state/store.js'
-import { isScheduleDue, sleepTimerExpired } from './matching.js'
+import { isScheduleDue, shrinkDue, sleepTimerExpired } from './matching.js'
 import type { TriggerRepository } from './repository.js'
 
 /**
@@ -58,13 +58,14 @@ export class Scheduler {
     this.deps.store.off('change', this.onStoreChange)
   }
 
-  /** One pass over schedules and sleep timers. Safe to call directly in tests. */
+  /** One pass over schedules, sleep timers and group shrinks. Safe to call directly in tests. */
   async tick(): Promise<void> {
     if (this.running) return
     this.running = true
     try {
       await this.runSchedules()
       await this.runSleepTimers()
+      await this.runShrinks()
     } catch (err) {
       this.logger.error({ err }, 'scheduler tick failed')
     } finally {
@@ -182,6 +183,37 @@ export class Scheduler {
         'sleep timer stopped preset',
       )
       this.deps.triggers.recordFired(row.id, `${row.id}:${activation.id}`, null)
+    }
+  }
+
+  // --- group shrink -------------------------------------------------------
+
+  /**
+   * Drop presets back to their end-state rooms once they have run long enough.
+   *
+   * Driven off the activation's own `startedAt` on each tick, rather than a
+   * timer armed at activation, so a bedtime scene that was already playing when
+   * the server restarted still narrows to the bedroom.
+   */
+  private async runShrinks() {
+    const now = this.now()
+    for (const activation of this.deps.engine.liveActivations()) {
+      if (activation.shrunkAt) continue
+      const preset = this.deps.presets.get(activation.presetId)
+      if (!preset?.shrink) continue
+      if (!shrinkDue(activation.startedAt, preset.shrink.afterMinutes, now)) continue
+
+      const result = await this.deps.engine.shrink(preset.id, preset.shrink.keepZoneIds)
+      // Stamped either way. A shrink that could not be done is not going to
+      // become possible on the next tick, and retrying every 20 seconds for the
+      // rest of the night would fill the log with the same complaint.
+      this.deps.engine.markShrunk(activation.id)
+      if (!result.shrunk) {
+        this.logger.warn(
+          { presetId: preset.id, reason: result.reason },
+          'did not shrink preset to its keep list',
+        )
+      }
     }
   }
 

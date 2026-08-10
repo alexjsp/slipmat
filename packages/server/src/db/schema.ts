@@ -13,6 +13,8 @@ export const presets = sqliteTable('presets', {
   dedupe: integer('dedupe', { mode: 'boolean' }).notNull().default(true),
   pauseOthers: integer('pause_others', { mode: 'boolean' }).notNull().default(false),
   crossfade: integer('crossfade', { mode: 'boolean' }).notNull().default(false),
+  shrinkAfterMinutes: integer('shrink_after_minutes'),
+  shrinkKeepZoneIdsJson: text('shrink_keep_zone_ids_json'),
   homekitEnabled: integer('homekit_enabled', { mode: 'boolean' }).notNull().default(false),
   /** Secret in the webhook URL; regenerable from the editor. */
   webhookToken: text('webhook_token').notNull(),
@@ -95,6 +97,7 @@ export const activations = sqliteTable(
     warningsJson: text('warnings_json').notNull().default('[]'),
     /** Cleared when the activation stops or is superseded. */
     live: integer('live', { mode: 'boolean' }).notNull().default(true),
+    shrunkAt: text('shrunk_at'),
     startedAt: text('started_at').notNull().default(now),
   },
   (table) => [index('activations_live').on(table.live, table.presetId)],

@@ -658,6 +658,80 @@ describe('ActivationEngine', () => {
     })
   })
 
+  describe('shrinking to fewer rooms', () => {
+    const shrinkPreset = (keepZoneIds: string[]) =>
+      create({
+        name: `Bedtime ${keepZoneIds.join('-')}`,
+        zones: [
+          { zoneId: KITCHEN, volume: 20, isCoordinator: true },
+          { zoneId: BEDROOM, volume: 10, isCoordinator: false },
+        ],
+        shrink: { afterMinutes: 30, keepZoneIds },
+      })
+
+    it('ungroups the rooms it is not keeping, and leaves the music playing', async () => {
+      const preset = shrinkPreset([KITCHEN])
+      await engine.activate(preset)
+      await settle()
+
+      const result = await engine.shrink(preset.id, [KITCHEN])
+
+      expect(result).toEqual({ shrunk: true, dropped: [BEDROOM] })
+      const group = driver.snapshot().groups.find((g) => g.coordinatorZoneId === KITCHEN)
+      expect(group?.memberZoneIds).toEqual([KITCHEN])
+      expect(group?.transportState).toBe('PLAYING')
+      // Still the same activation: narrowing a preset is not stopping it.
+      expect(engine.liveActivation(preset.id)).toBeDefined()
+    })
+
+    it('narrows the activation, so active-state follows the smaller group', async () => {
+      const preset = shrinkPreset([KITCHEN])
+      await engine.activate(preset)
+      await settle()
+      await engine.shrink(preset.id, [KITCHEN])
+
+      // Was expecting both rooms; expecting Bedroom still would read as stopped.
+      expect(engine.isStillPlaying(preset.id)).toBe(true)
+    })
+
+    it('refuses to drop the speaker holding the queue', async () => {
+      // Keeping only a follower would ungroup the coordinator and leave the one
+      // room you asked for playing nothing at all.
+      const preset = shrinkPreset([BEDROOM])
+      await engine.activate(preset)
+      await settle()
+
+      const result = await engine.shrink(preset.id, [BEDROOM])
+
+      expect(result.shrunk).toBe(false)
+      const group = driver.snapshot().groups.find((g) => g.coordinatorZoneId === KITCHEN)
+      expect(group?.memberZoneIds.sort()).toEqual([BEDROOM, KITCHEN])
+    })
+
+    it('leaves a room someone joined by hand where they put it', async () => {
+      const preset = shrinkPreset([KITCHEN])
+      await engine.activate(preset)
+      await settle()
+      // Someone wanders in and adds the office to the group themselves.
+      await driver.joinGroup(KITCHEN, [OFFICE])
+
+      await engine.shrink(preset.id, [KITCHEN])
+
+      const group = driver.snapshot().groups.find((g) => g.coordinatorZoneId === KITCHEN)
+      expect(group?.memberZoneIds.sort()).toEqual([KITCHEN, OFFICE])
+    })
+
+    it('does nothing once the preset has been stopped', async () => {
+      const preset = shrinkPreset([KITCHEN])
+      await engine.activate(preset)
+      await settle()
+      await engine.stop(preset.id)
+
+      const result = await engine.shrink(preset.id, [KITCHEN])
+      expect(result).toEqual({ shrunk: false, reason: 'no longer playing' })
+    })
+  })
+
   describe('active-state detection', () => {
     it('reports active while our queue is playing on the right speakers', async () => {
       const preset = create()

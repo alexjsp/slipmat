@@ -116,3 +116,14 @@ function isWeekend(days: number[]): boolean {
   const set = new Set(days)
   return set.size === 2 && set.has(0) && set.has(6)
 }
+
+/**
+ * Has a preset been playing long enough to drop back to fewer rooms?
+ *
+ * Measured from the activation, not from a timer set in memory: the check runs
+ * on the scheduler's tick, so it still fires correctly for music that was
+ * already playing when the server restarted.
+ */
+export function shrinkDue(startedAt: string, afterMinutes: number, now: Date): boolean {
+  return now.getTime() - new Date(startedAt).getTime() >= afterMinutes * 60 * 1000
+}

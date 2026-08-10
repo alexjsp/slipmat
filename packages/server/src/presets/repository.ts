@@ -56,6 +56,8 @@ export class PresetRepository {
           dedupe: input.dedupe,
           pauseOthers: input.pauseOthers,
           crossfade: input.crossfade,
+          shrinkAfterMinutes: input.shrink?.afterMinutes ?? null,
+          shrinkKeepZoneIdsJson: input.shrink ? JSON.stringify(input.shrink.keepZoneIds) : null,
           homekitEnabled: input.homekitEnabled,
           webhookToken: newWebhookToken(),
           position: maxPosition,
@@ -81,6 +83,8 @@ export class PresetRepository {
           dedupe: input.dedupe,
           pauseOthers: input.pauseOthers,
           crossfade: input.crossfade,
+          shrinkAfterMinutes: input.shrink?.afterMinutes ?? null,
+          shrinkKeepZoneIdsJson: input.shrink ? JSON.stringify(input.shrink.keepZoneIds) : null,
           homekitEnabled: input.homekitEnabled,
           updatedAt: new Date().toISOString(),
         })
@@ -246,6 +250,13 @@ export class PresetRepository {
       dedupe: row.dedupe,
       pauseOthers: row.pauseOthers,
       crossfade: row.crossfade,
+      shrink:
+        row.shrinkAfterMinutes === null
+          ? null
+          : {
+              afterMinutes: row.shrinkAfterMinutes,
+              keepZoneIds: JSON.parse(row.shrinkKeepZoneIdsJson ?? '[]') as string[],
+            },
       homekitEnabled: row.homekitEnabled,
       webhookToken: row.webhookToken,
       position: row.position,

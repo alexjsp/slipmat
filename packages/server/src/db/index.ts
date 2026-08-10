@@ -73,6 +73,8 @@ const DDL = [
   `ALTER TABLE resolved_sources ADD COLUMN container_metadata_object_json TEXT`,
   `ALTER TABLE resolved_sources ADD COLUMN expensive INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE presets ADD COLUMN shuffle INTEGER NOT NULL DEFAULT 1`,
+  `ALTER TABLE presets ADD COLUMN shrink_after_minutes INTEGER`,
+  `ALTER TABLE presets ADD COLUMN shrink_keep_zone_ids_json TEXT`,
 
   `CREATE TABLE IF NOT EXISTS activations (
     id TEXT PRIMARY KEY,
@@ -86,6 +88,9 @@ const DDL = [
     started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   )`,
   `CREATE INDEX IF NOT EXISTS activations_live ON activations (live, preset_id)`,
+  // Stamped once the group has been shrunk, so a tick-based check cannot do it
+  // twice — and so it survives a restart, which a setTimeout would not.
+  `ALTER TABLE activations ADD COLUMN shrunk_at TEXT`,
 
   `CREATE TABLE IF NOT EXISTS preset_triggers (
     id TEXT PRIMARY KEY,

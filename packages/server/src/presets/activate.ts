@@ -256,6 +256,57 @@ export class ActivationEngine {
     return { activationId, noop: false, warnings }
   }
 
+  /**
+   * Drop the preset back to the rooms it is meant to end in.
+   *
+   * Only the zones this activation actually grouped are ungrouped, so a room
+   * someone joined by hand is left where they put it. The coordinator is never
+   * dropped — the queue lives on it, and ungrouping it would stop the music
+   * everywhere rather than narrow it.
+   *
+   * Returns what it did, so the caller can record it and not do it twice.
+   */
+  async shrink(
+    presetId: string,
+    keepZoneIds: string[],
+  ): Promise<{ shrunk: true; dropped: string[] } | { shrunk: false; reason: string }> {
+    const activation = this.liveActivation(presetId)
+    if (!activation) return { shrunk: false, reason: 'no longer playing' }
+
+    const keep = new Set(keepZoneIds)
+    if (!keep.has(activation.coordinatorZoneId)) {
+      // Can happen without the preset being wrong: if the intended coordinator
+      // was unreachable at activation, another zone took the role.
+      return {
+        shrunk: false,
+        reason: `the queue is on a speaker that is not in the keep list (${activation.coordinatorZoneId})`,
+      }
+    }
+
+    const mine = JSON.parse(activation.memberZoneIdsJson) as string[]
+    const dropped = mine.filter((zoneId) => !keep.has(zoneId))
+    if (dropped.length === 0) return { shrunk: false, reason: 'nothing left to drop' }
+
+    await this.deps.driver.leaveGroup(dropped)
+    this.deps.db
+      .update(activations)
+      .set({ memberZoneIdsJson: JSON.stringify(mine.filter((zoneId) => keep.has(zoneId))) })
+      .where(eq(activations.id, activation.id))
+      .run()
+    this.deps.store.refresh()
+    this.logger.info({ presetId, dropped }, 'shrank preset to its keep list')
+    return { shrunk: true, dropped }
+  }
+
+  /** Record that the shrink has been dealt with, so a tick loop won't retry it. */
+  markShrunk(activationId: string) {
+    this.deps.db
+      .update(activations)
+      .set({ shrunkAt: new Date().toISOString() })
+      .where(eq(activations.id, activationId))
+      .run()
+  }
+
   async stop(presetId: string): Promise<boolean> {
     const activation = this.liveActivation(presetId)
     if (!activation) return false

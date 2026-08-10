@@ -152,9 +152,9 @@ describe('Scheduler', () => {
     schedule(preset.id, {})
     const scheduler = makeScheduler()
 
-    await scheduler.tick()
+    await makeScheduler().tick()
     await engine.stop(preset.id)
-    await scheduler.tick()
+    await makeScheduler().tick()
 
     // The second tick must not restart it.
     expect(engine.isStillPlaying(preset.id)).toBe(false)
@@ -319,5 +319,45 @@ describe('Scheduler', () => {
     // left to run — and certainly no crash.
     await expect(makeScheduler().tick()).resolves.toBeUndefined()
     expect(triggers.list()).toHaveLength(0)
+  })
+
+  describe('group shrink', () => {
+    it('fires once the preset has been playing long enough, and only once', async () => {
+      const preset = presets.create(
+        {
+          ...presetInput(),
+          name: 'Bedtime',
+          zones: [
+            { zoneId: KITCHEN, volume: 20, isCoordinator: true },
+            { zoneId: BEDROOM, volume: 10, isCoordinator: false },
+          ],
+          shrink: { afterMinutes: 30, keepZoneIds: [KITCHEN] },
+        },
+        zoneNames(),
+      )
+      await engine.activate(preset)
+
+      // Not yet: a bedtime scene should not narrow the moment it starts.
+      await makeScheduler().tick()
+      expect(
+        driver.snapshot().groups.find((g) => g.coordinatorZoneId === KITCHEN)?.memberZoneIds.length,
+      ).toBe(2)
+
+      now = new Date(now.getTime() + 31 * 60 * 1000)
+      await makeScheduler().tick()
+      expect(
+        driver.snapshot().groups.find((g) => g.coordinatorZoneId === KITCHEN)?.memberZoneIds,
+      ).toEqual([KITCHEN])
+
+      // A second tick must not re-run it; someone may have regrouped by hand.
+      await driver.joinGroup(KITCHEN, [BEDROOM])
+      await makeScheduler().tick()
+      expect(
+        driver
+          .snapshot()
+          .groups.find((g) => g.coordinatorZoneId === KITCHEN)
+          ?.memberZoneIds.sort(),
+      ).toEqual([BEDROOM, KITCHEN])
+    })
   })
 })
