@@ -133,7 +133,10 @@ export function PresetEditor({
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="max-h-[92dvh] overflow-y-auto overflow-x-hidden">
+        <SheetContent
+          side="bottom"
+          className="max-h-[92dvh] overflow-y-auto overflow-x-hidden sm:mx-auto sm:max-w-2xl sm:rounded-t-xl sm:border-x"
+        >
           <SheetHeader>
             <SheetTitle>{preset ? 'Edit preset' : 'New preset'}</SheetTitle>
             <SheetDescription>
