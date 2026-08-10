@@ -96,9 +96,15 @@ export function PresetEditor({
       const zones = selected
         ? [...current.zones, { zoneId, volume: DEFAULT_VOLUME, isCoordinator: false }]
         : current.zones.filter((zone) => zone.zoneId !== zoneId)
-      // The queue lives on the coordinator, so one must always exist.
-      if (!zones.some((zone) => zone.isCoordinator) && zones[0]) zones[0].isCoordinator = true
-      return { ...current, zones }
+
+      // The queue lives on the coordinator, so one must always exist. Zones are
+      // held in the order they were ticked, so this makes the first speaker you
+      // pick the coordinator — and promotes the next one along if you untick it.
+      const withCoordinator = zones.some((zone) => zone.isCoordinator)
+        ? zones
+        : zones.map((zone, index) => ({ ...zone, isCoordinator: index === 0 }))
+
+      return { ...current, zones: withCoordinator }
     })
   }
 
@@ -147,14 +153,7 @@ export function PresetEditor({
             </div>
 
             <section className="flex flex-col gap-3">
-              <div className="flex items-baseline justify-between">
-                <h3 className="font-medium text-sm">Speakers</h3>
-                {draft.zones.length > 1 && (
-                  <span className="text-muted-foreground text-xs">
-                    Tap a name to make it the coordinator
-                  </span>
-                )}
-              </div>
+              <h3 className="font-medium text-sm">Speakers</h3>
 
               {zones.map((zone) => {
                 const selected = draft.zones.find((entry) => entry.zoneId === zone.id)
@@ -166,29 +165,22 @@ export function PresetEditor({
                         checked={!!selected}
                         onCheckedChange={(checked) => toggleZone(zone.id, checked === true)}
                       />
-                      <button
-                        type="button"
-                        disabled={!selected}
-                        onClick={() =>
-                          patch({
-                            zones: draft.zones.map((entry) => ({
-                              ...entry,
-                              isCoordinator: entry.zoneId === zone.id,
-                            })),
-                          })
-                        }
+                      {/* A real label, so the whole row toggles the checkbox —
+                          including the empty space after a short name. */}
+                      <label
+                        htmlFor={`zone-${zone.id}`}
                         className={cn(
-                          'flex-1 text-left text-sm disabled:cursor-default',
-                          selected?.isCoordinator && 'font-medium',
+                          'flex-1 cursor-pointer py-1 text-sm',
+                          selected?.isCoordinator && draft.zones.length > 1 && 'font-medium',
                         )}
                       >
                         {zone.name}
                         {selected?.isCoordinator && draft.zones.length > 1 && (
                           <span className="ml-2 text-muted-foreground text-xs">coordinator</span>
                         )}
-                      </button>
+                      </label>
                       {selected && (
-                        <span className="w-8 text-right text-muted-foreground text-xs tabular-nums">
+                        <span className="w-8 shrink-0 text-right text-muted-foreground text-xs tabular-nums">
                           {selected.volume}
                         </span>
                       )}

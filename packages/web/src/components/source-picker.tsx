@@ -62,21 +62,21 @@ export function SourcePicker({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85dvh] gap-0 overflow-hidden p-0 sm:max-w-lg">
-        <DialogHeader className="p-4 pb-2">
-          <DialogTitle>Add a source</DialogTitle>
+      <DialogContent className="grid-cols-[minmax(0,1fr)] max-h-[85dvh] gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <DialogHeader className="min-w-0 p-4 pb-2 text-left">
+          <DialogTitle className="pr-6">Add a source</DialogTitle>
           <DialogDescription>
             Sources are shuffled together into one queue when the preset runs.
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="browse" className="gap-0">
+        <Tabs defaultValue="browse" className="min-w-0 gap-0">
           <TabsList className="mx-4">
             <TabsTrigger value="browse">Browse</TabsTrigger>
             <TabsTrigger value="link">Paste a link</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="browse" className="max-h-[55dvh] overflow-y-auto p-4">
+          <TabsContent value="browse" className="min-w-0 max-h-[55dvh] overflow-y-auto p-4">
             {path !== '' && (
               <Button variant="ghost" size="sm" className="mb-2 gap-1" onClick={() => setPath('')}>
                 <ChevronLeft className="size-4" />
@@ -124,7 +124,7 @@ export function SourcePicker({
             )}
           </TabsContent>
 
-          <TabsContent value="link" className="flex flex-col gap-3 p-4">
+          <TabsContent value="link" className="flex min-w-0 flex-col gap-3 p-4">
             <div className="flex gap-2">
               <Input
                 value={url}
