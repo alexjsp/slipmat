@@ -212,6 +212,16 @@ export function PresetEditor({
           // and on a phone the overlay is most of the screen. Cancel and Save
           // are both right there; closing is left to them and to Escape.
           onInteractOutside={(event) => event.preventDefault()}
+          // Don't land on the Name field. Radix focuses the first focusable
+          // thing on open, which on iOS raises the keyboard over most of the
+          // sheet before anyone has said they want to type — and the name is
+          // usually the one field already filled in when editing.
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            // Focus still has to enter the dialog, or a keyboard user is left
+            // behind on the trigger. Radix gives the content tabIndex -1 for it.
+            if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus()
+          }}
           className="max-h-[92dvh] overflow-y-auto overflow-x-hidden sm:mx-auto sm:max-w-2xl sm:rounded-t-xl sm:border-x"
         >
           <SheetHeader>

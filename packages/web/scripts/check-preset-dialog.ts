@@ -30,6 +30,14 @@ const sheet = page.getByRole('dialog')
 check('sheet opens', await sheet.isVisible())
 check('rules are offered before the preset exists', await sheet.getByText('Rules').isVisible())
 
+// On iOS, focusing a text field on open raises the keyboard over the sheet.
+const focused = await page.evaluate(() => {
+  const el = document.activeElement
+  return { tag: el?.tagName ?? null, isDialog: el?.getAttribute('role') === 'dialog' }
+})
+check(`opening does not focus a text field (focused: ${focused.tag})`, focused.tag !== 'INPUT')
+check('focus still moves into the dialog', focused.isDialog)
+
 await page.mouse.click(215, 20)
 await page.waitForTimeout(600)
 check('an outside click does not dismiss it', await sheet.isVisible())
