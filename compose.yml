@@ -14,10 +14,30 @@ services:
     network_mode: host
     volumes:
       - /mnt/user/appdata/slipmat:/data
+    # Every setting the server reads has to be listed here. Compose reads .env
+    # for interpolation but injects nothing on its own, so a variable set in
+    # .env and missing below is silently ignored — the app starts happily on the
+    # default and gives no hint that the setting was seen and dropped.
+    #
+    # SLIPMAT_FAKE_SONOS is deliberately absent: production should not be able
+    # to run against the in-memory household by way of a stray .env line.
     environment:
+      SLIPMAT_HOST: ${SLIPMAT_HOST:-0.0.0.0}
       SLIPMAT_PORT: ${SLIPMAT_PORT:-5544}
       SLIPMAT_DATA_DIR: /data
       SLIPMAT_LOG_LEVEL: ${SLIPMAT_LOG_LEVEL:-info}
+      # Extra hostnames to accept in the Host header, comma separated. Additive:
+      # bare IPs, localhost, *.local and *.ts.net are always allowed, so this is
+      # only needed for a real domain pointed at the box.
+      SLIPMAT_ALLOWED_HOSTS: ${SLIPMAT_ALLOWED_HOSTS:-}
+      # Host and port the speakers dial back into for UPnP events. Only needed
+      # when the address they should use isn't the one we'd guess.
+      SLIPMAT_CALLBACK_HOST: ${SLIPMAT_CALLBACK_HOST:-}
+      SLIPMAT_TZ: ${SLIPMAT_TZ:-}
+      # Expansion temporarily replaces an idle speaker's queue, so it stays off
+      # unless asked for.
+      SLIPMAT_ALLOW_QUEUE_EXPANSION: ${SLIPMAT_ALLOW_QUEUE_EXPANSION:-0}
+      SLIPMAT_UTILITY_ZONE: ${SLIPMAT_UTILITY_ZONE:-}
       # Auth is optional: set SLIPMAT_PASSWORD in .env to require a login.
       # Left blank there is no login, which is a reasonable default on a trusted
       # LAN — Sonos has no auth of its own either.
@@ -27,4 +47,5 @@ services:
       SLIPMAT_SEED_IP: ${SLIPMAT_SEED_IP:-}
       SLIPMAT_HOMEKIT: ${SLIPMAT_HOMEKIT:-0}
       SLIPMAT_HOMEKIT_PIN: ${SLIPMAT_HOMEKIT_PIN:-031-45-154}
+      SLIPMAT_HOMEKIT_NAME: ${SLIPMAT_HOMEKIT_NAME:-Slipmat}
     restart: unless-stopped
