@@ -665,6 +665,19 @@ export class RealSonosDriver implements SonosDriver {
     await this.coordinatorFor(zoneId).AVTransportService.RemoveAllTracksFromQueue()
   }
 
+  async reorderQueue(
+    zoneId: string,
+    move: { from: number; count: number; insertBefore: number },
+  ): Promise<void> {
+    await this.coordinatorFor(zoneId).AVTransportService.ReorderTracksInQueue({
+      InstanceID: 0,
+      StartingIndex: move.from,
+      NumberOfTracks: move.count,
+      InsertBefore: move.insertBefore,
+      UpdateID: 0,
+    })
+  }
+
   async removeTrackFromQueue(zoneId: string, position: number): Promise<void> {
     await this.coordinatorFor(zoneId).AVTransportService.RemoveTrackFromQueue({
       InstanceID: 0,

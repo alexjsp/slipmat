@@ -320,6 +320,21 @@ export class FakeSonosDriver implements SonosDriver {
     this.changed()
   }
 
+  async reorderQueue(
+    zoneId: string,
+    move: { from: number; count: number; insertBefore: number },
+  ): Promise<void> {
+    this.record('reorderQueue', zoneId, move)
+    const queue = this.groupFor(zoneId).queue
+    const taken = queue.splice(move.from - 1, move.count)
+    // Removing the run shifts anything after it down, so the insertion point
+    // moves with it — the same arithmetic a real speaker does internally.
+    const target =
+      move.insertBefore > move.from ? move.insertBefore - move.count : move.insertBefore
+    queue.splice(target - 1, 0, ...taken)
+    this.changed()
+  }
+
   async removeTrackFromQueue(zoneId: string, position: number): Promise<void> {
     this.record('removeTrackFromQueue', zoneId, position)
     this.groupFor(zoneId).queue.splice(position - 1, 1)

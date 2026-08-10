@@ -140,6 +140,17 @@ export interface SonosDriver {
    */
   removeTrackFromQueue(zoneId: string, position: number): Promise<void>
   /**
+   * Move a run of tracks so it sits immediately before `insertBefore`.
+   *
+   * Positions are 1-based, and everything between the two points shifts to
+   * make room — so a caller doing many of these has to track where things
+   * ended up.
+   */
+  reorderQueue(
+    zoneId: string,
+    move: { from: number; count: number; insertBefore: number },
+  ): Promise<void>
+  /**
    * Enqueue in order. Implementations batch to respect the SOAP payload limit.
    *
    * `metadata` is an already-XML-encoded DIDL string (as taken verbatim from a

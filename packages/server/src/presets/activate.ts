@@ -39,6 +39,9 @@ const CONTAINER_ENQUEUE_TIMEOUT_MS = 5 * 60 * 1000
  */
 const FAST_START_MAX_TRACKS = 100
 
+/** Moves between liveness checks while shuffling; each is a round trip. */
+const SHUFFLE_LIVENESS_INTERVAL = 50
+
 export type ActivationDeps = {
   db: Db
   driver: SonosDriver
@@ -222,10 +225,7 @@ export class ActivationEngine {
     const ordered = flags.shuffle ? this.orderForFastStart(playable) : playable
     const [head, ...tail] = ordered
     await this.enqueueSource(coordinator.zoneId, head!)
-    await this.deps.driver.setPlayMode(
-      coordinator.zoneId,
-      playModeFor({ shuffle: flags.shuffle, repeatAll: flags.repeatAll }),
-    )
+    await this.deps.driver.setPlayMode(coordinator.zoneId, playModeFor(flags))
     await this.deps.driver.setTransportToQueue(coordinator.zoneId)
     await this.deps.driver.play(coordinator.zoneId)
 
@@ -475,9 +475,7 @@ export class ActivationEngine {
     if (options.dedupe) await this.dedupeQueue(zoneId)
     if (!this.isLive(activationId)) return
 
-    // Re-asserted now the queue is complete, so Sonos shuffles across all of it
-    // rather than across whatever was present when playback began.
-    await this.deps.driver.setPlayMode(zoneId, playModeFor(options))
+    if (options.shuffle) await this.shuffleQueue(activationId, zoneId)
 
     const queue = await this.deps.driver.getQueue(zoneId)
     if (!this.isLive(activationId)) return
@@ -490,6 +488,55 @@ export class ActivationEngine {
       })
       .where(eq(activations.id, activationId))
       .run()
+  }
+
+  /**
+   * Shuffle the queue itself, because Sonos will not.
+   *
+   * `SetPlayMode(SHUFFLE)` is accepted and reads back as SHUFFLE, and then has
+   * no effect whatsoever: verified against the household, playback starts at
+   * track 1 and advances 1, 2, 3 through a 2,082-track queue, whether the mode
+   * is set before or after pointing the transport at the queue, and whether or
+   * not playback is restarted from a stop. So the interleaving has to be real.
+   *
+   * A Fisher-Yates built out of single-track moves, running back to front: the
+   * shuffled portion grows at the tail, so each move draws from the untouched
+   * prefix and the arithmetic stays simple. Roughly 7ms a move regardless of
+   * how many tracks are moved, so a couple of thousand tracks is about fifteen
+   * seconds — done behind playback, and only over the part of the queue that
+   * has not been played yet, so nothing already heard comes back round.
+   */
+  private async shuffleQueue(activationId: string, zoneId: string): Promise<void> {
+    const queue = await this.deps.driver.getQueue(zoneId)
+    const group = this.deps.driver
+      .snapshot()
+      .groups.find((candidate) => candidate.coordinatorZoneId === zoneId)
+    const playingIdentity = trackIdentity(group?.currentTrackUri)
+    const playingIndex = queue.findIndex((item) => trackIdentity(item.uri) === playingIdentity)
+
+    // Everything after the current track is fair game; what has already played
+    // stays where it is.
+    const first = (playingIndex === -1 ? 0 : playingIndex + 1) + 1
+    if (queue.length - first < 1) return
+
+    const started = Date.now()
+    let moves = 0
+    for (let last = queue.length; last > first; last -= 1) {
+      if (moves % SHUFFLE_LIVENESS_INTERVAL === 0 && !this.isLive(activationId)) {
+        this.logger.info({ activationId, moves }, 'shuffle abandoned; activation is no longer live')
+        return
+      }
+      const pick = first + Math.floor(this.random() * (last - first + 1))
+      if (pick === last) continue
+      await this.deps.driver
+        .reorderQueue(zoneId, { from: pick, count: 1, insertBefore: last + 1 })
+        .catch((err) => this.logger.debug({ err, pick, last }, 'reorder failed'))
+      moves += 1
+    }
+    this.logger.info(
+      { moves, tracks: queue.length - first + 1, elapsedMs: Date.now() - started },
+      'shuffled queue',
+    )
   }
 
   /**
@@ -613,11 +660,15 @@ type EnqueueableSource = {
 }
 
 /**
- * Sonos does the interleaving now, so shuffle is a play mode rather than
- * something we bake into queue order.
+ * Only repeat. Shuffle is deliberately absent.
+ *
+ * Sonos accepts `SHUFFLE` and reads it back, then plays the queue in order
+ * anyway — verified against the household on a 2,082-track queue. Setting it
+ * would claim something untrue about how the queue is being played, so the
+ * interleaving is done by reordering the queue and the mode says only whether
+ * to loop.
  */
-function playModeFor(flags: { shuffle: boolean; repeatAll: boolean }): DriverPlayMode {
-  if (flags.shuffle) return flags.repeatAll ? 'SHUFFLE' : 'SHUFFLE_NOREPEAT'
+function playModeFor(flags: { repeatAll: boolean }): DriverPlayMode {
   return flags.repeatAll ? 'REPEAT_ALL' : 'NORMAL'
 }
 

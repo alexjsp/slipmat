@@ -141,7 +141,6 @@ describe('ActivationEngine', () => {
     // enqueueing track by track, which costs ~780ms each against real hardware.
     const queue = driver.queueOf(KITCHEN)
     expect([...queue].sort()).toEqual(['jazz-1', 'jazz-2', 'jazz-3', 'rock-1', 'rock-2', 'rock-3'])
-    expect(driver.playModeOf(KITCHEN)).toBe('SHUFFLE')
   })
 
   it('plays sources in order when shuffle is off', async () => {
@@ -256,16 +255,14 @@ describe('ActivationEngine', () => {
     expect(group?.transportState).toBe('PLAYING')
   })
 
-  it('maps the shuffle and repeat flags onto a Sonos play mode', async () => {
-    // Shuffle is a play mode now, not a queue order, so both flags land here.
-    await engine.activate(create())
-    expect(driver.playModeOf(KITCHEN)).toBe('SHUFFLE')
+  it('puts only repeat in the play mode, never shuffle', async () => {
+    // Sonos ignores SHUFFLE, so claiming it would misdescribe what the speaker
+    // is doing; the queue is shuffled by reordering instead.
+    await engine.activate(create({ shuffle: true, repeatAll: true }))
+    expect(driver.playModeOf(KITCHEN)).toBe('REPEAT_ALL')
 
     await engine.activate(create({ shuffle: true, repeatAll: false }), { restart: true })
-    expect(driver.playModeOf(KITCHEN)).toBe('SHUFFLE_NOREPEAT')
-
-    await engine.activate(create({ shuffle: false, repeatAll: true }), { restart: true })
-    expect(driver.playModeOf(KITCHEN)).toBe('REPEAT_ALL')
+    expect(driver.playModeOf(KITCHEN)).toBe('NORMAL')
 
     const other = create({
       name: 'Neither',
@@ -280,6 +277,9 @@ describe('ActivationEngine', () => {
   it('stops by pausing, leaving the group and queue intact to resume', async () => {
     const preset = create()
     await engine.activate(preset)
+    // Wait for the background fill and shuffle, so this compares against the
+    // settled queue rather than racing it.
+    await settle()
     const queue = driver.queueOf(KITCHEN)
 
     expect(await engine.stop(preset.id)).toBe(true)
@@ -546,6 +546,65 @@ describe('ActivationEngine', () => {
 
       expect(firstOpener).toBe(2)
       expect(secondOpener).toBe(40)
+    })
+
+    it('shuffles the queue itself, because Sonos ignores the shuffle play mode', async () => {
+      // Verified against the household: SetPlayMode(SHUFFLE) reads back as
+      // SHUFFLE and playback still runs 1, 2, 3 through the queue. So the
+      // interleaving has to be real reordering.
+      driver.setBrowseResult(
+        'SQ:1',
+        Array.from({ length: 30 }, (_, index) => track(`jazz-${index}`)),
+      )
+      driver.setBrowseResult(
+        'SQ:2',
+        Array.from({ length: 30 }, (_, index) => track(`rock-${index}`)),
+      )
+      const preset = create({
+        dedupe: false,
+        sources: [
+          { kind: 'sonos_playlist', ref: 'SQ:1', label: 'Jazz' },
+          { kind: 'sonos_playlist', ref: 'SQ:2', label: 'Rock' },
+        ],
+      })
+
+      await engine.activate(preset)
+      await settle()
+
+      const queue = driver.queueOf(KITCHEN)
+      expect(queue).toHaveLength(60)
+      // Same tracks, genuinely interleaved rather than one source then the other.
+      expect([...queue].sort()).toEqual(
+        [
+          ...Array.from({ length: 30 }, (_, index) => `jazz-${index}`),
+          ...Array.from({ length: 30 }, (_, index) => `rock-${index}`),
+        ].sort(),
+      )
+      const firstHalf = queue.slice(0, 30)
+      expect(firstHalf.some((uri) => uri.startsWith('jazz'))).toBe(true)
+      expect(firstHalf.some((uri) => uri.startsWith('rock'))).toBe(true)
+    })
+
+    it('does not reshuffle what has already been played', async () => {
+      driver.setBrowseResult(
+        'SQ:1',
+        Array.from({ length: 20 }, (_, index) => track(`jazz-${index}`)),
+      )
+      const preset = create({ sources: [{ kind: 'sonos_playlist', ref: 'SQ:1', label: 'Jazz' }] })
+
+      await engine.activate(preset)
+      // Pretend we are five tracks in before the shuffle lands.
+      driver.setPlaying(KITCHEN, 'x-rincon-queue:k#0', 'jazz-4')
+      await settle()
+
+      // The played run is untouched; bringing it back round would repeat music.
+      expect(driver.queueOf(KITCHEN).slice(0, 5)).toEqual([
+        'jazz-0',
+        'jazz-1',
+        'jazz-2',
+        'jazz-3',
+        'jazz-4',
+      ])
     })
 
     it('leaves the playing track alone when deduping', async () => {
