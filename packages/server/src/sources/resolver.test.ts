@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createLogger } from '../logger.js'
+import { decodeEntities } from '../sonos/didl.js'
 import type { DriverBrowseItem } from '../sonos/driver.js'
 import { FakeSonosDriver } from '../sonos/fake-driver.js'
 import { SourceResolver } from './resolver.js'
@@ -73,6 +74,45 @@ describe('SourceResolver', () => {
     expect(result.mode).toBe('stream')
     expect(result.tracks).toEqual([])
     expect(result.containerUri).toBe('x-sonosapi-stream:bbc_6music?sid=254')
+  })
+
+  it('carries the container service token onto every expanded track', async () => {
+    // Sonos strips the token from the queue entries it expands a container
+    // into. Without carrying it across, the tracks play but the Sonos app can
+    // only describe them as "No Content".
+    const token = 'SA_RINCON52231_X_#Svc52231-decc08f-Token'
+    const containerUri = 'x-rincon-cpcontainer:1006206clibraryplaylist%3ap.abc?sid=204&flags=8300'
+    driver.setBrowseResult('FV:2', [
+      {
+        id: 'FV:2/8',
+        title: 'Well Rated Music',
+        subtitle: null,
+        album: null,
+        artUrl: null,
+        isContainer: false,
+        uri: containerUri,
+        metadata:
+          `&lt;DIDL-Lite&gt;&lt;item&gt;&lt;desc id="cdudn" ` +
+          `nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/"&gt;${token}` +
+          `&lt;/desc&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;`,
+      },
+    ])
+    driver.setContainerContents(containerUri, [
+      {
+        ...track('x-sonos-http:librarytrack%3aa.1440913387.mp4?sid=204&sn=2', 'A Comet Appears'),
+        // As Sonos hands it back: queue position for an id, no token.
+        id: 'Q:0/1',
+      },
+    ])
+
+    const result = await resolver(true).resolve({ kind: 'sonos_favorite', ref: 'FV:2/8' })
+
+    expect(result.mode).toBe('tracks')
+    const metadata = decodeEntities(result.tracks[0]!.metadata!)
+    expect(metadata).toContain(token)
+    expect(metadata).toContain('id="10032020librarytrack%3aa.1440913387"')
+    expect(metadata).not.toContain('Q:0')
+    expect(metadata).toContain('<dc:title>A Comet Appears</dc:title>')
   })
 
   it('expands a pasted Spotify playlist via the scratch queue', async () => {

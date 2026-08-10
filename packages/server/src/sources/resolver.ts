@@ -1,6 +1,7 @@
 import type { ResolutionMode, SourceKind } from '@domovoi/shared'
 import { MetaDataHelper } from '@svrooij/sonos'
 import type { Logger } from '../logger.js'
+import { buildTrackMetadata, extractCdudn } from '../sonos/didl.js'
 import type { DriverBrowseItem, SonosDriver } from '../sonos/driver.js'
 import { isRadioStream } from '../sonos/uris.js'
 import { parseServiceUrl, ServiceNotConnectedError, serviceDisplayName } from './service-urls.js'
@@ -114,7 +115,9 @@ export class SourceResolver {
    */
   private async resolveContainerObject(source: SourceInput): Promise<ResolvedSource> {
     const items = await this.browseAll(source.ref)
-    const tracks = items.filter((item) => !item.isContainer && item.uri).map(toResolvedTrack)
+    const tracks = items
+      .filter((item) => !item.isContainer && item.uri)
+      .map((item) => toResolvedTrack(item))
 
     if (tracks.length === 0) {
       return {
@@ -287,7 +290,11 @@ export class SourceResolver {
         },
       ])
       const expanded = await this.driver.getQueue(zoneId)
-      const tracks = expanded.filter((item) => item.uri).map(toResolvedTrack)
+      // Sonos strips the service token from the entries it expands a container
+      // into, so carry it across from the container itself. Without it the
+      // tracks play but the Sonos app can't resolve them and shows "No Content".
+      const token = extractCdudn(containerMetadata) ?? cdUdnOf(containerMetadataObject)
+      const tracks = expanded.filter((item) => item.uri).map((item) => toResolvedTrack(item, token))
 
       if (tracks.length === 0) {
         return containerOnly('Sonos returned no tracks for this source.')
@@ -386,10 +393,29 @@ export class SourceResolver {
   }
 }
 
-function toResolvedTrack(item: DriverBrowseItem): ResolvedTrack {
+/** Pasted-link containers carry their token on a Track object, not as DIDL. */
+function cdUdnOf(containerMetadataObject: unknown): string | null {
+  if (!containerMetadataObject || typeof containerMetadataObject !== 'object') return null
+  const value = (containerMetadataObject as { CdUdn?: unknown }).CdUdn
+  return typeof value === 'string' && value ? value : null
+}
+
+function toResolvedTrack(item: DriverBrowseItem, token: string | null = null): ResolvedTrack {
   return {
     uri: item.uri!,
-    metadata: item.metadata,
+    // Rebuilt rather than reused: a queue entry describes itself by queue
+    // position, which Sonos discards when offered back as enqueue metadata.
+    metadata:
+      buildTrackMetadata({
+        uri: item.uri!,
+        title: item.title,
+        creator: item.subtitle,
+        album: item.album,
+        // Deliberately no albumArtURI: the driver has rewritten it into an
+        // absolute URL against one speaker, and Sonos derives its own from the
+        // track URI anyway.
+        token,
+      }) ?? item.metadata,
     title: item.title,
     artist: item.subtitle,
   }

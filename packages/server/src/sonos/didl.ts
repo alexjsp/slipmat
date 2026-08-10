@@ -119,3 +119,96 @@ const DIDL_OPEN =
   ' xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"' +
   ' xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/"' +
   ' xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'
+
+/**
+ * Sonos' object-id prefix for a service track. The eight hex digits encode item
+ * type and flags; `10032020` is what the Sonos app itself uses when it enqueues
+ * a single streaming track.
+ */
+const TRACK_ID_PREFIX = '10032020'
+
+/**
+ * The object id Sonos expects for a service track, derived from its stream URI.
+ *
+ * `x-sonos-http:librarytrack%3aa.144091.mp4?sid=204&…` → `10032020librarytrack%3aa.144091`.
+ * The `%3a` stays encoded: it is part of the identifier, not an escape.
+ */
+export function serviceItemId(uri: string): string | null {
+  if (!uri.startsWith('x-sonos-http:')) return null
+  const path = uri.slice('x-sonos-http:'.length).split('?')[0] ?? ''
+  const withoutExtension = path.replace(/\.[a-z0-9]+$/i, '')
+  return withoutExtension ? `${TRACK_ID_PREFIX}${withoutExtension}` : null
+}
+
+/**
+ * Pull the `SA_RINCON…-Token` out of a container's metadata.
+ *
+ * Only containers carry it. Sonos strips it from the queue entries it expands a
+ * container into, so a track's own metadata can't supply it — it has to be
+ * carried across from the container the track came from.
+ */
+export function extractCdudn(metadata: string | null | undefined): string | null {
+  if (!metadata) return null
+  const xml = metadata.includes('&lt;') ? decodeEntities(metadata) : metadata
+  return /<desc id="cdudn"[^>]*>([^<]*)<\/desc>/.exec(xml)?.[1] ?? null
+}
+
+function xmlText(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+
+/**
+ * Build enqueue metadata for a single service track.
+ *
+ * A queue entry cannot be handed back as its own metadata, even though it looks
+ * like it should be: Sonos rewrites the entry's `id` to its queue position
+ * (`Q:0/7`) and drops the service token. Offered that back as
+ * `EnqueuedURIMetaData`, Sonos silently discards the whole document — the track
+ * still plays, because the URI alone is enough to stream it, but it is stored
+ * as a bare `object.item` with no title, artist or art, and the Sonos app shows
+ * it as "No Content" because it can't resolve the item back to the service.
+ *
+ * So the descriptive fields are read off the queue entry, and the identity —
+ * object id and service token — is reconstructed.
+ */
+export function buildTrackMetadata(track: {
+  uri: string
+  title?: string | null
+  creator?: string | null
+  album?: string | null
+  albumArtUri?: string | null
+  /** The `SA_RINCON…-Token` from the container this track was expanded from. */
+  token?: string | null
+  parentId?: string | null
+}): string | null {
+  const id = serviceItemId(track.uri)
+  if (!id) return null
+
+  const parts = [
+    track.title ? `<dc:title>${xmlText(track.title)}</dc:title>` : '',
+    '<upnp:class>object.item.audioItem.musicTrack</upnp:class>',
+    track.creator ? `<dc:creator>${xmlText(track.creator)}</dc:creator>` : '',
+    track.album ? `<upnp:album>${xmlText(track.album)}</upnp:album>` : '',
+    track.albumArtUri ? `<upnp:albumArtURI>${xmlText(track.albumArtUri)}</upnp:albumArtURI>` : '',
+    track.token
+      ? `<desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">${xmlText(
+          track.token,
+        )}</desc>`
+      : '',
+  ]
+
+  const element =
+    `<item id="${xmlText(id)}" parentID="${xmlText(track.parentId ?? '-1')}" restricted="true">` +
+    `${parts.join('')}</item>`
+
+  // Escaped, because the SOAP layer inserts a string metadata value verbatim.
+  return `${DIDL_OPEN}${element}</DIDL-Lite>`
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
