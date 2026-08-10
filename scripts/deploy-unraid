@@ -5,9 +5,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 DEPLOY_HOST="${DEPLOY_HOST:-root@unraid.jsp.scot}"
-DEPLOY_PATH="${DEPLOY_PATH:-/mnt/user/appdata/domovoi_source}"
+DEPLOY_PATH="${DEPLOY_PATH:-/mnt/user/appdata/slipmat_source}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yml}"
-DEPLOY_PROJECT_NAME="${DEPLOY_PROJECT_NAME:-domovoi}"
+DEPLOY_PROJECT_NAME="${DEPLOY_PROJECT_NAME:-slipmat}"
 RSYNC_RSH="${RSYNC_RSH:-ssh}"
 RSYNC_FLAGS="${RSYNC_FLAGS:--az}"
 
@@ -22,7 +22,7 @@ SYNC_PATHS=(
   "./packages/"
 )
 
-echo "Deploying Domovoi to ${DEPLOY_HOST}:${DEPLOY_PATH}"
+echo "Deploying Slipmat to ${DEPLOY_HOST}:${DEPLOY_PATH}"
 echo "Using Compose project ${DEPLOY_PROJECT_NAME}"
 
 ssh "${DEPLOY_HOST}" "mkdir -p '${DEPLOY_PATH}'"
@@ -42,7 +42,7 @@ ssh "${DEPLOY_HOST}" "mkdir -p '${DEPLOY_PATH}'"
 REMOTE_CMD="$(cat <<EOF
 set -euo pipefail
 cd '${DEPLOY_PATH}'
-# .env is optional — it only carries settings like DOMOVOI_PASSWORD, and auth
+# .env is optional — it only carries settings like SLIPMAT_PASSWORD, and auth
 # is off by default.
 touch .env
 docker compose -p '${DEPLOY_PROJECT_NAME}' -f '${COMPOSE_FILE}' build

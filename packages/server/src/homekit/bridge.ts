@@ -38,7 +38,7 @@ const HAP_SERVICE_COMMUNICATION_FAILURE = -70402
 /**
  * Embedded HAP bridge — no Homebridge required.
  *
- * Imported dynamically and only when `DOMOVOI_HOMEKIT=1`, so with the feature
+ * Imported dynamically and only when `SLIPMAT_HOMEKIT=1`, so with the feature
  * off the HAP library is never loaded and nothing is advertised over mDNS.
  */
 export async function startHomeKitBridge(deps: HomeKitDeps): Promise<HomeKitBridge> {
@@ -52,13 +52,13 @@ export async function startHomeKitBridge(deps: HomeKitDeps): Promise<HomeKitBrid
   hap.HAPStorage.setCustomStoragePath(storagePath)
 
   const bridgeName = deps.config.homekit.name
-  const bridge = new Bridge(bridgeName, uuid.generate(`domovoi:bridge:${bridgeName}`))
+  const bridge = new Bridge(bridgeName, uuid.generate(`slipmat:bridge:${bridgeName}`))
 
   /** Accessories currently published, keyed by the preset they represent. */
   const presetAccessories = new Map<string, InstanceType<typeof Accessory>>()
 
   const buildPresetAccessory = (presetId: string, name: string) => {
-    const accessory = new Accessory(name, uuid.generate(`domovoi:preset:${presetId}`))
+    const accessory = new Accessory(name, uuid.generate(`slipmat:preset:${presetId}`))
     const service = accessory.addService(Service.Switch, name)
 
     service
@@ -85,7 +85,7 @@ export async function startHomeKitBridge(deps: HomeKitDeps): Promise<HomeKitBrid
     return accessory
   }
 
-  const pauseAllAccessory = new Accessory('Pause All Music', uuid.generate('domovoi:pause-all'))
+  const pauseAllAccessory = new Accessory('Pause All Music', uuid.generate('slipmat:pause-all'))
   const pauseAllService = pauseAllAccessory.addService(Service.Switch, 'Pause All Music')
   pauseAllService
     .getCharacteristic(Characteristic.On)

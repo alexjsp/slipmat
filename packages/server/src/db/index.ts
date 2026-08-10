@@ -119,7 +119,7 @@ const DDL = [
 ]
 
 export function openDatabase(options: { dataDir: string } | { inMemory: true }) {
-  const file = 'inMemory' in options ? ':memory:' : join(options.dataDir, 'domovoi.db')
+  const file = 'inMemory' in options ? ':memory:' : join(options.dataDir, 'slipmat.db')
   if (!('inMemory' in options)) mkdirSync(dirname(file), { recursive: true })
 
   const sqlite = new Database(file)

@@ -1,5 +1,5 @@
-import type { Preset, PresetStatus } from '@domovoi/shared'
-import { presetInputSchema, presetRuleInputSchema } from '@domovoi/shared'
+import type { Preset, PresetStatus } from '@slipmat/shared'
+import { presetInputSchema, presetRuleInputSchema } from '@slipmat/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { ActivationEngine } from '../presets/activate.js'

@@ -65,7 +65,7 @@ export async function buildServer({
 
   app.get('/api/health', async () => ({
     status: 'ok',
-    version: process.env.DOMOVOI_VERSION ?? 'dev',
+    version: process.env.SLIPMAT_VERSION ?? 'dev',
     sonosReady: store.current.ready,
   }))
 
@@ -107,7 +107,7 @@ export async function buildServer({
   refresher.start()
   app.addHook('onClose', async () => refresher.stop())
 
-  // Off unless DOMOVOI_HOMEKIT=1, and the HAP library is only imported when it
+  // Off unless SLIPMAT_HOMEKIT=1, and the HAP library is only imported when it
   // is — so with the feature off nothing is advertised over mDNS at all.
   let homekit: HomeKitBridge | undefined
   if (config.homekit.enabled) {

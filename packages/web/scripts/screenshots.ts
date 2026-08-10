@@ -3,10 +3,10 @@
  *
  * Interactive surfaces (the preset editor, the source picker, the rule editor)
  * only exist behind a click, so the plain headless-shell `--screenshot` flag
- * can't reach them. Assumes a Domovoi server is already running with
- * DOMOVOI_FAKE_SONOS=1.
+ * can't reach them. Assumes a Slipmat server is already running with
+ * SLIPMAT_FAKE_SONOS=1.
  *
- *   pnpm --filter @domovoi/web exec tsx scripts/screenshots.ts <outDir> [baseUrl]
+ *   pnpm --filter @slipmat/web exec tsx scripts/screenshots.ts <outDir> [baseUrl]
  */
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'

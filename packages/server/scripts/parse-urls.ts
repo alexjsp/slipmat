@@ -4,7 +4,7 @@
  * Touches no speakers — purely parsing plus MetaDataHelper's URI construction.
  * Useful for triaging "why won't this link work?" before involving hardware.
  *
- *   pnpm --filter @domovoi/server exec tsx scripts/parse-urls.ts <url> [url…]
+ *   pnpm --filter @slipmat/server exec tsx scripts/parse-urls.ts <url> [url…]
  */
 import { MetaDataHelper } from '@svrooij/sonos'
 import { parseServiceUrl } from '../src/sources/service-urls.js'

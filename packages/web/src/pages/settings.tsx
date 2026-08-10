@@ -23,7 +23,7 @@ export function SettingsPage() {
           <p className="text-muted-foreground text-sm">Loading…</p>
         ) : !homekit.data?.enabled ? (
           <p className="text-muted-foreground text-sm">
-            Off. Set <code className="font-mono">DOMOVOI_HOMEKIT=1</code> and restart to expose your
+            Off. Set <code className="font-mono">SLIPMAT_HOMEKIT=1</code> and restart to expose your
             presets as HomeKit switches, plus a Pause All Music switch.
           </p>
         ) : !homekit.data.running ? (
@@ -35,7 +35,7 @@ export function SettingsPage() {
           <div className="flex flex-col gap-2">
             <p className="text-muted-foreground text-sm">
               In the Home app choose “Add Accessory”, then “More options…”, and pick{' '}
-              <strong>Domovoi</strong>. Enter this code when asked:
+              <strong>Slipmat</strong>. Enter this code when asked:
             </p>
             <p className="font-mono text-2xl tracking-wider">{homekit.data.pincode}</p>
             <p className="text-muted-foreground text-xs">

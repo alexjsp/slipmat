@@ -3,7 +3,7 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-const API_TARGET = process.env.DOMOVOI_API_URL ?? 'http://localhost:5544'
+const API_TARGET = process.env.SLIPMAT_API_URL ?? 'http://localhost:5544'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

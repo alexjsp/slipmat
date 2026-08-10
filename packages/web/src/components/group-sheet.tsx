@@ -1,4 +1,4 @@
-import type { Group, Zone } from '@domovoi/shared'
+import type { Group, Zone } from '@slipmat/shared'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Sheet,

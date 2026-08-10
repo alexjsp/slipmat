@@ -1,17 +1,17 @@
-# Domovoi — self-hosted Sonos control & automation
+# Slipmat — self-hosted Sonos control & automation
 
 ## Context
 
 There is no good self-hosted way to say "start *this* set of speakers, at *these* volumes, playing *these* playlists shuffled together" and then trigger it from a phone, a webhook, or HomeKit. The Sonos app can't do it; `node-sonos-http-api` gets partway there but is dormant, UI-less, and its flat JSON presets can't express multi-source shuffle.
 
-Domovoi is a Docker container on the LAN that owns a live picture of the Sonos system and exposes:
+Slipmat is a Docker container on the LAN that owns a live picture of the Sonos system and exposes:
 
 1. A simple web UI for everyday playback — play/pause/skip/seek, volume, group/ungroup.
 2. **Presets** — the core feature: named automations that group speakers, set per-speaker volumes, and start playback of a track pool shuffled together from several playlists / albums / favourites.
 3. Three ways to fire a preset: UI buttons, webhooks, and (optional) HomeKit switches that also *report* whether the preset is playing and can stop it.
 4. A **Pause All Music** action that silences the house without touching TV audio.
 
-`/Users/alex/Developer/Domovoi` is an empty git repo — greenfield.
+`/Users/alex/Developer/Slipmat` is an empty git repo — greenfield.
 
 ## Research outcome: build on `@svrooij/sonos`, not `node-sonos-http-api`
 
@@ -36,7 +36,7 @@ pnpm monorepo, single image.
 
 Plain REST + Zod, no tRPC — webhooks and Shortcuts-style clients need a boring HTTP surface anyway.
 
-**`network_mode: host` is a hard requirement** — SSDP discovery, UPnP event callbacks the speakers must dial back into, and HomeKit mDNS all need it. `DOMOVOI_SEED_IP` gives a discovery fallback, and the advertised callback host/port is configurable.
+**`network_mode: host` is a hard requirement** — SSDP discovery, UPnP event callbacks the speakers must dial back into, and HomeKit mDNS all need it. `SLIPMAT_SEED_IP` gives a discovery fallback, and the advertised callback host/port is configurable.
 
 ## Architecture
 
@@ -150,7 +150,7 @@ Decisions worth stating up front, because each is a bug if left implicit:
 
 - **Evaluated once, at activation.** A preset fired at 20:59 does not mutate into the wind-down version at 21:00. The queue is built once; changing it under a listener would be worse than the inconsistency.
 - **All matching rules apply, in order** — not first-match-wins. That makes "December *and* Thursday" compose naturally, and `replaceSources` gives a deliberate escape hatch when someone wants override semantics. Rule order is user-controlled and visible.
-- **Timezone is explicit.** A `DOMOVOI_TZ` setting defaulting to the container's zone, because "after 21:00" silently meaning UTC is exactly the sort of thing that only surfaces in December.
+- **Timezone is explicit.** A `SLIPMAT_TZ` setting defaulting to the container's zone, because "after 21:00" silently meaning UTC is exactly the sort of thing that only surfaces in December.
 - **Midnight-wrapping windows are the default case, not an edge case.** `21:00–05:00` must mean the obvious thing.
 - **Evaluation is pure**: `evaluateRules(rules, now) → EffectivePreset`, with the clock injected. No time-dependent test flake, and the UI can ask "what would this do right now?" without touching a speaker.
 - **The resolver cache warms every rule's sources**, not just the base ones — otherwise the first December activation pays for a cold resolve, which for a streaming container means borrowing a speaker at exactly the wrong moment.
@@ -182,7 +182,7 @@ Pause every group playing **music**, skipping any coordinator whose transport UR
 One `pauseAllMusic()` service, three entry points: a UI header button, a webhook with a reserved system token, and a HomeKit switch.
 
 ### HomeKit (`server/homekit/`) — optional, off by default
-Embedded `@homebridge/hap-nodejs`, **no Homebridge required**. Gated behind `DOMOVOI_HOMEKIT=1`: when unset the module is never imported and nothing is advertised over mDNS. Everything else works unchanged.
+Embedded `@homebridge/hap-nodejs`, **no Homebridge required**. Gated behind `SLIPMAT_HOMEKIT=1`: when unset the module is never imported and nothing is advertised over mDNS. Everything else works unchanged.
 
 When enabled: one `Switch` per preset with `homekit: true` (on → activate, off → stop, state → the active-state computation), plus a **Pause All Music** switch. That one is momentary — it reports OFF and auto-resets ~1s after being flipped on, since "is all music paused" isn't a meaningful persistent state. Pairing code + QR in Settings; HAP state in `/data/hap`.
 
@@ -196,18 +196,18 @@ When enabled: one `Switch` per preset with `homekit: true` (on → activate, off
 - `GET /api/art?…` — proxies speaker `:1400/getaa` artwork so it works off-LAN behind Tailscale or a reverse proxy.
 
 ### Auth — optional, off by default
-**Setting `DOMOVOI_PASSWORD` is what turns authentication on.** Leave it unset and Domovoi is wide open on the LAN, which is the right default: Sonos itself has no authentication, so anything on the network can already drive the speakers. Requiring a login to reach a control surface that Sonos leaves open would be friction without a matching security gain.
+**Setting `SLIPMAT_PASSWORD` is what turns authentication on.** Leave it unset and Slipmat is wide open on the LAN, which is the right default: Sonos itself has no authentication, so anything on the network can already drive the speakers. Requiring a login to reach a control surface that Sonos leaves open would be friction without a matching security gain.
 
-When the variable *is* set: the password is argon2-hashed at boot, the UI gets an httpOnly signed session cookie, and a Fastify preHandler guards everything except login and `/api/webhooks/*`. Worth turning on if Domovoi is reachable beyond the LAN, or if the household shouldn't all have preset-editing rights.
+When the variable *is* set: the password is argon2-hashed at boot, the UI gets an httpOnly signed session cookie, and a Fastify preHandler guards everything except login and `/api/webhooks/*`. Worth turning on if Slipmat is reachable beyond the LAN, or if the household shouldn't all have preset-editing rights.
 
 Independent of that setting:
 
-- **Webhook tokens are always required.** They're the secret in the URL, not a session, so they work from Shortcuts and Node-RED either way — and an unauthenticated Domovoi still doesn't hand out working webhook URLs to anyone who asks.
+- **Webhook tokens are always required.** They're the secret in the URL, not a session, so they work from Shortcuts and Node-RED either way — and an unauthenticated Slipmat still doesn't hand out working webhook URLs to anyone who asks.
 - **The host-header allowlist always applies.** It blunts DNS rebinding, which is the one attack an open LAN service is genuinely exposed to from a browser, and it costs the user nothing.
 
 Startup logs once, at `warn`, when auth is off — a reminder, not a nag.
 
-### Data model (Drizzle, SQLite at `/data/domovoi.db`)
+### Data model (Drizzle, SQLite at `/data/slipmat.db`)
 `presets` · `preset_zones` (preset_id, zone_id, volume, is_coordinator) · `preset_sources` (preset_id, position, kind, ref, label) · `resolved_tracks` cache (source hash, uris JSON, resolved_at) · `activations` · `settings`. A **`triggers` table exists from day one** so cron schedules drop in later without migration — no scheduler in v1.
 
 ## UI (shadcn, mobile-first, dark mode)
@@ -218,7 +218,7 @@ Transport only — starting *content* always goes through a preset.
 - `/settings` — password, HomeKit pairing, discovery seed IP, utility zone, cache controls, logs.
 
 ## Packaging & deploy
-Mirrors `~/Developer/euroscores`: `compose.yml` (Unraid paths under `/mnt/user/appdata/domovoi`, `network_mode: host`), `compose.local.yml` for dev, a `justfile`, and `scripts/deploy-unraid` that rsyncs sources to `root@unraid.jsp.scot:/mnt/user/appdata/domovoi_source`, builds remotely and `docker compose up -d`. Nothing Unraid-specific in the image itself — a plain `docker run --network host -v ./data:/data ghcr.io/…/domovoi` works anywhere.
+Mirrors `~/Developer/euroscores`: `compose.yml` (Unraid paths under `/mnt/user/appdata/slipmat`, `network_mode: host`), `compose.local.yml` for dev, a `justfile`, and `scripts/deploy-unraid` that rsyncs sources to `root@unraid.jsp.scot:/mnt/user/appdata/slipmat_source`, builds remotely and `docker compose up -d`. Nothing Unraid-specific in the image itself — a plain `docker run --network host -v ./data:/data ghcr.io/…/slipmat` works anywhere.
 
 `just` recipes: `dev`, `test`, `lint`, `build`, `docker-dev`, `deploy-unraid`.
 
@@ -230,7 +230,7 @@ Mirrors `~/Developer/euroscores`: `compose.yml` (Unraid paths under `/mnt/user/a
 - **M4** preset schema, resolver cache, activation engine with fast start, unit tests.
 - **M5** preset UI + editor.
 - **M6** webhooks, active-state computation, stop/restart, Pause All Music.
-- **M7** embedded HomeKit bridge behind `DOMOVOI_HOMEKIT=1`.
+- **M7** embedded HomeKit bridge behind `SLIPMAT_HOMEKIT=1`.
 - **M8** auth, GHCR multi-arch image, deploy script, README.
 - **M9** conditional rules — pure `evaluateRules` + tests, `preset_rules` table, rule editor with a live "right now" preview.
 
@@ -243,11 +243,11 @@ Mirrors `~/Developer/euroscores`: `compose.yml` (Unraid paths under `/mnt/user/a
 
 ## Verification
 - `just test` — resolver, dedupe, shuffle determinism, and the active-state machine against a faked Sonos layer.
-- `just dev` on the LAN: discover zones, confirm Now Playing tracks the Sonos app live; group/ungroup/volume from Domovoi and watch the Sonos app follow.
+- `just dev` on the LAN: discover zones, confirm Now Playing tracks the Sonos app live; group/ungroup/volume from Slipmat and watch the Sonos app follow.
 - Build a preset from two Sonos playlists + one pasted Spotify URL. Activate: verify grouping and volumes, that **sound starts within ~1s**, that the queue is interleaved across all three sources rather than sequential, and that the rest of the pool appears behind it.
 - Fire the same webhook twice — second call is a no-op, music doesn't restart. Then *Restart* and confirm a different shuffle order.
 - Unplug/deny one speaker in a preset — the rest still play and a warning surfaces.
 - Pause in the Sonos app → UI badge and HomeKit switch both go off within a couple of seconds.
 - Music in two rooms **and** the TV on the soundbar → Pause All Music from UI, webhook and HomeKit: music stops, TV audio keeps playing.
-- Run once with `DOMOVOI_HOMEKIT` unset (nothing on mDNS, everything else works), then set: pair in the Home app, toggle a preset switch both ways, confirm state after activating that preset from the web UI instead.
+- Run once with `SLIPMAT_HOMEKIT` unset (nothing on mDNS, everything else works), then set: pair in the Home app, toggle a preset switch both ways, confirm state after activating that preset from the web UI instead.
 - `just deploy-unraid`, then the full flow against the Unraid instance with a clean `/data` volume.

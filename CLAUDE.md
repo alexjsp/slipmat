@@ -1,4 +1,4 @@
-# Domovoi
+# Slipmat
 
 Self-hosted web app for controlling and automating a Sonos system on the local network.
 See the approved plan at `docs/PLAN.md`.
@@ -30,7 +30,7 @@ ungrouping, modifying queues, saving or deleting Sonos playlists, and setting pl
 the **fake household**, and captures the page with the headless Chromium that Playwright caches
 (no browser dependency in this repo). Nothing real is touched.
 
-`DOMOVOI_FAKE_SONOS=1` also works for interactive development — it seeds a grouped pair playing a
+`SLIPMAT_FAKE_SONOS=1` also works for interactive development — it seeds a grouped pair playing a
 queue, a soundbar on TV audio, and an idle room, which is enough to exercise most UI states.
 
 ## Conventions

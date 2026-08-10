@@ -28,9 +28,9 @@ describe('preset and webhook routes', () => {
     driver = new FakeSonosDriver({ tvZoneIds: [LIVING] })
     app = await buildServer({
       config: loadConfig({
-        DOMOVOI_LOG_LEVEL: 'error',
-        DOMOVOI_FAKE_SONOS: '1',
-        DOMOVOI_DATA_DIR: ':memory:',
+        SLIPMAT_LOG_LEVEL: 'error',
+        SLIPMAT_FAKE_SONOS: '1',
+        SLIPMAT_DATA_DIR: ':memory:',
       }),
       logger: createLogger({ logLevel: 'error' }),
       driver,

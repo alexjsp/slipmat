@@ -26,7 +26,7 @@ jobs:
 
       - run: pnpm exec biome ci .
 
-      - run: pnpm --filter @domovoi/shared build
+      - run: pnpm --filter @slipmat/shared build
 
       - run: pnpm -r typecheck
 

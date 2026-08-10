@@ -1,4 +1,4 @@
-import type { Preset, PresetStatus, Zone } from '@domovoi/shared'
+import type { Preset, PresetStatus, Zone } from '@slipmat/shared'
 import { AlertTriangle, Loader2, Pencil, Play, Plus, RotateCcw, Square } from 'lucide-react'
 import { useState } from 'react'
 import { PresetEditor } from '@/components/preset-editor'

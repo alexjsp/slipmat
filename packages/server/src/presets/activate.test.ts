@@ -1,4 +1,4 @@
-import type { PresetInput } from '@domovoi/shared'
+import type { PresetInput } from '@slipmat/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { openDatabase } from '../db/index.js'
 import { createLogger } from '../logger.js'

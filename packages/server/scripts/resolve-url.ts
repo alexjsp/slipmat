@@ -5,7 +5,7 @@
  * the code path an actual preset uses. Borrows the named zone's queue for the
  * expansion and restores it.
  *
- *   pnpm --filter @domovoi/server exec tsx scripts/resolve-url.ts \
+ *   pnpm --filter @slipmat/server exec tsx scripts/resolve-url.ts \
  *     --zone "Alex's Office" --url "https://…"
  */
 import { loadConfig } from '../src/config.js'

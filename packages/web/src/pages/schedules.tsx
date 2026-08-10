@@ -1,5 +1,5 @@
-import type { Preset, ScheduleConfig, Trigger, TriggerInput } from '@domovoi/shared'
-import { DAY_LABELS } from '@domovoi/shared'
+import type { Preset, ScheduleConfig, Trigger, TriggerInput } from '@slipmat/shared'
+import { DAY_LABELS } from '@slipmat/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Clock, Moon, Plus, Trash2, Tv } from 'lucide-react'
 import { useState } from 'react'

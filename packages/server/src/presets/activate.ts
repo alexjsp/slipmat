@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { ActivationResult, Preset, SourceKind } from '@domovoi/shared'
+import type { ActivationResult, Preset, SourceKind } from '@slipmat/shared'
 import { and, eq } from 'drizzle-orm'
 import type { Db } from '../db/index.js'
 import { activations } from '../db/schema.js'

@@ -1,4 +1,4 @@
-import type { ServerEvent } from '@domovoi/shared'
+import type { ServerEvent } from '@slipmat/shared'
 import type { FastifyInstance } from 'fastify'
 import type { SystemStateStore } from '../state/store.js'
 

@@ -1,4 +1,4 @@
-import type { ServerEvent, SystemState } from '@domovoi/shared'
+import type { ServerEvent, SystemState } from '@slipmat/shared'
 import { useEffect, useRef, useState } from 'react'
 
 export type ConnectionStatus = 'connecting' | 'open' | 'closed'

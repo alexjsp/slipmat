@@ -62,7 +62,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   return (
     <main className="flex min-h-dvh items-center justify-center p-4">
       <Card className="w-full max-w-sm gap-4 p-6">
-        <h1 className="font-semibold text-xl tracking-tight">Domovoi</h1>
+        <h1 className="font-semibold text-xl tracking-tight">Slipmat</h1>
         <form className="flex flex-col gap-3" onSubmit={submit}>
           <div className="flex flex-col gap-2">
             <Label htmlFor="password">Password</Label>

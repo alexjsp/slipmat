@@ -4,7 +4,7 @@
  * Tries several metadata variants against one zone, clearing the queue between
  * each, and reports which Sonos accepts. Mutates the named zone's queue only.
  *
- *   pnpm --filter @domovoi/server exec tsx scripts/probe-enqueue.ts \
+ *   pnpm --filter @slipmat/server exec tsx scripts/probe-enqueue.ts \
  *     --zone "Alex's Office" --url "https://…"
  */
 import { MetaDataHelper, SonosManager } from '@svrooij/sonos'

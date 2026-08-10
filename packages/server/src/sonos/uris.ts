@@ -1,4 +1,4 @@
-import type { PlaybackKind } from '@domovoi/shared'
+import type { PlaybackKind } from '@slipmat/shared'
 
 /**
  * Sonos encodes what a group is doing in the URI it is playing. These prefixes

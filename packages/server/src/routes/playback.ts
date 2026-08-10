@@ -4,7 +4,7 @@ import {
   muteRequestSchema,
   seekRequestSchema,
   volumeRequestSchema,
-} from '@domovoi/shared'
+} from '@slipmat/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { SonosDriver } from '../sonos/driver.js'

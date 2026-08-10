@@ -6,7 +6,7 @@ import type { Logger } from './logger.js'
 
 const loginBodySchema = z.object({ password: z.string().min(1) })
 
-const SESSION_COOKIE = 'domovoi_session'
+const SESSION_COOKIE = 'slipmat_session'
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
 /** Paths that must work without a session, whatever the auth setting. */
@@ -27,7 +27,7 @@ function isPublicPath(url: string): boolean {
  *
  * This runs whether or not authentication is enabled, because DNS rebinding is
  * the one attack a browser can mount against an open service on someone's LAN:
- * a malicious page resolves its own hostname to Domovoi's private IP and then
+ * a malicious page resolves its own hostname to Slipmat's private IP and then
  * drives it with the user's own browser. Checking Host closes that off, and
  * costs a correctly-configured user nothing.
  */
@@ -59,16 +59,16 @@ export async function registerAuth(app: FastifyInstance, { config, logger }: Aut
 
   // Signing the cookie means a session value can't be forged without the secret.
   const secret =
-    config.sessionSecret ?? (enabled ? undefined : 'domovoi-unauthenticated-placeholder')
+    config.sessionSecret ?? (enabled ? undefined : 'slipmat-unauthenticated-placeholder')
   if (enabled && !secret) {
     logger.warn(
-      'DOMOVOI_PASSWORD is set without DOMOVOI_SESSION_SECRET — sessions will not survive a restart',
+      'SLIPMAT_PASSWORD is set without SLIPMAT_SESSION_SECRET — sessions will not survive a restart',
     )
   }
 
   const cookie = await import('@fastify/cookie')
   await app.register(cookie.default, {
-    secret: config.sessionSecret ?? 'domovoi-dev-secret',
+    secret: config.sessionSecret ?? 'slipmat-dev-secret',
   })
 
   app.addHook('onRequest', async (request, reply) => {
@@ -77,7 +77,7 @@ export async function registerAuth(app: FastifyInstance, { config, logger }: Aut
       return reply.status(421).send({
         error: 'bad_host',
         message:
-          'Unexpected Host header. Add this hostname to DOMOVOI_ALLOWED_HOSTS if it is yours.',
+          'Unexpected Host header. Add this hostname to SLIPMAT_ALLOWED_HOSTS if it is yours.',
       })
     }
 
@@ -125,7 +125,7 @@ export async function registerAuth(app: FastifyInstance, { config, logger }: Aut
     logger.info('authentication enabled')
   } else {
     logger.warn(
-      'No DOMOVOI_PASSWORD set — the UI is open to anyone on the network. This is the default; set a password to require a login.',
+      'No SLIPMAT_PASSWORD set — the UI is open to anyone on the network. This is the default; set a password to require a login.',
     )
   }
 }

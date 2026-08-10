@@ -17,7 +17,7 @@ import { UnknownZoneError } from './errors.js'
  * An in-memory Sonos household.
  *
  * Every automated test runs against this — never a real system. It also backs
- * `DOMOVOI_FAKE_SONOS=1`, so the UI can be developed without hardware.
+ * `SLIPMAT_FAKE_SONOS=1`, so the UI can be developed without hardware.
  *
  * It models the behaviours that actually bite in production: grouping moves
  * members between groups, a coordinator that joins someone else's group stops
@@ -412,7 +412,7 @@ export class FakeSonosDriver implements SonosDriver {
     this.changed()
   }
 
-  /** Simulate someone starting music outside Domovoi. */
+  /** Simulate someone starting music outside Slipmat. */
   setPlaying(zoneId: string, transportUri: string, trackUri: string) {
     const group = this.groupFor(zoneId)
     group.transportUri = transportUri

@@ -1,4 +1,4 @@
-import type { PresetInput } from '@domovoi/shared'
+import type { PresetInput } from '@slipmat/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { openDatabase } from '../db/index.js'
 import { createLogger } from '../logger.js'
@@ -139,7 +139,7 @@ describe('Scheduler', () => {
   it('never fires late after a restart', async () => {
     const preset = presets.create(presetInput(), zoneNames())
     schedule(preset.id, {})
-    // Domovoi comes up at 07:45, having been down at 07:30.
+    // Slipmat comes up at 07:45, having been down at 07:30.
     now = new Date('2026-06-15T07:45:00Z')
 
     await makeScheduler().tick()

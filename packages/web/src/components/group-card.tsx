@@ -1,4 +1,4 @@
-import type { Group, Zone } from '@domovoi/shared'
+import type { Group, Zone } from '@slipmat/shared'
 import { Music, Pause, Play, Radio, SkipBack, SkipForward, Speaker, Tv } from 'lucide-react'
 import { useState } from 'react'
 import { GroupSheet } from '@/components/group-sheet'

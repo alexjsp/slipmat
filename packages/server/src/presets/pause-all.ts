@@ -1,4 +1,4 @@
-import type { PauseAllResponse } from '@domovoi/shared'
+import type { PauseAllResponse } from '@slipmat/shared'
 import type { SonosDriver } from '../sonos/driver.js'
 import { classifyPlaybackKind, isProtectedFromPauseAll } from '../sonos/uris.js'
 import type { SystemStateStore } from '../state/store.js'

@@ -57,7 +57,7 @@ function mergeDidl(metadatas: (string | null)[]): string {
 type Track = { uri: string; metadata: string | null }
 
 async function main() {
-  const db = new Database(arg('db') ?? '../../data/domovoi.db', { readonly: true })
+  const db = new Database(arg('db') ?? '../../data/slipmat.db', { readonly: true })
   const row = db
     .prepare("SELECT tracks_json FROM resolved_sources WHERE label LIKE '%Great%' LIMIT 1")
     .get() as { tracks_json: string } | undefined

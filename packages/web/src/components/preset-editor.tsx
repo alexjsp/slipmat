@@ -1,4 +1,4 @@
-import type { Preset, PresetInput, Zone } from '@domovoi/shared'
+import type { Preset, PresetInput, Zone } from '@slipmat/shared'
 import { Check, Copy, GripVertical, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { RuleEditor } from '@/components/rule-editor'

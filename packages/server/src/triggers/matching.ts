@@ -1,4 +1,4 @@
-import type { ScheduleConfig } from '@domovoi/shared'
+import type { ScheduleConfig } from '@slipmat/shared'
 import { type Clock, clockFrom } from '../presets/rules.js'
 
 /**
@@ -6,7 +6,7 @@ import { type Clock, clockFrom } from '../presets/rules.js'
  *
  * Two rules drive the design:
  *
- * - **A missed schedule stays missed.** If Domovoi was down at 07:30 and starts
+ * - **A missed schedule stays missed.** If Slipmat was down at 07:30 and starts
  *   at 07:45, nothing fires. So "due" means the current local minute *is* the
  *   scheduled minute — not "is at or past it".
  * - **Exactly once per occurrence.** The scheduler ticks more often than once a

@@ -18,14 +18,14 @@ DATA_DIR="$(mktemp -d)"
 cd "${ROOT_DIR}"
 
 echo "Building…"
-pnpm --filter @domovoi/shared build >/dev/null
-pnpm --filter @domovoi/server build >/dev/null
-pnpm --filter @domovoi/web build >/dev/null
+pnpm --filter @slipmat/shared build >/dev/null
+pnpm --filter @slipmat/server build >/dev/null
+pnpm --filter @slipmat/web build >/dev/null
 rm -rf packages/server/public
 cp -r packages/web/dist packages/server/public
 
-DOMOVOI_FAKE_SONOS=1 DOMOVOI_PORT="${PORT}" DOMOVOI_LOG_LEVEL=error \
-  DOMOVOI_DATA_DIR="${DATA_DIR}" DOMOVOI_HOMEKIT=1 DOMOVOI_HOMEKIT_NAME="Domovoi Demo" \
+SLIPMAT_FAKE_SONOS=1 SLIPMAT_PORT="${PORT}" SLIPMAT_LOG_LEVEL=error \
+  SLIPMAT_DATA_DIR="${DATA_DIR}" SLIPMAT_HOMEKIT=1 SLIPMAT_HOMEKIT_NAME="Slipmat Demo" \
   node packages/server/dist/index.js >/dev/null 2>&1 &
 SERVER_PID=$!
 cleanup() {
@@ -74,5 +74,5 @@ api PUT "/api/presets/${PRESET_A}/rules" '{"rules":[
 api POST "/api/presets/${PRESET_A}/activate" '{}' >/dev/null
 
 echo "Capturing…"
-pnpm --filter @domovoi/web exec tsx scripts/screenshots.ts "${OUT_DIR}" "http://127.0.0.1:${PORT}"
+pnpm --filter @slipmat/web exec tsx scripts/screenshots.ts "${OUT_DIR}" "http://127.0.0.1:${PORT}"
 echo "Wrote ${OUT_DIR}"

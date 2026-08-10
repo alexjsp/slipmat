@@ -1,4 +1,4 @@
-import type { EffectivePreset, PresetRule, PresetRuleInput } from '@domovoi/shared'
+import type { EffectivePreset, PresetRule, PresetRuleInput } from '@slipmat/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'

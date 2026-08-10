@@ -4,7 +4,7 @@ import type {
   PresetInput,
   PresetStatus,
   ResolveUrlResponse,
-} from '@domovoi/shared'
+} from '@slipmat/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError } from './api'
 

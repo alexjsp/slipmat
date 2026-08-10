@@ -1,4 +1,4 @@
-import type { PresetInput, ResolveUrlResponse } from '@domovoi/shared'
+import type { PresetInput, ResolveUrlResponse } from '@slipmat/shared'
 import { ChevronLeft, Folder, Loader2, Music, Radio } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'

@@ -1,4 +1,4 @@
-import type { BrowseItem, BrowseResponse, ResolveUrlResponse, SourceKind } from '@domovoi/shared'
+import type { BrowseItem, BrowseResponse, ResolveUrlResponse, SourceKind } from '@slipmat/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { SonosDriver } from '../sonos/driver.js'

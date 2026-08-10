@@ -1,4 +1,4 @@
-import type { SystemState } from '@domovoi/shared'
+import type { SystemState } from '@slipmat/shared'
 import { GroupCard } from '@/components/group-card'
 
 export function NowPlayingPage({

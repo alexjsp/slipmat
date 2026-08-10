@@ -1,4 +1,4 @@
-import type { Preset, PresetRule } from '@domovoi/shared'
+import type { Preset, PresetRule } from '@slipmat/shared'
 import { describe, expect, it } from 'vitest'
 import { type Clock, clockFrom, conditionMatches, evaluateRules } from './rules.js'
 

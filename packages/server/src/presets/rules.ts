@@ -1,4 +1,4 @@
-import type { EffectivePreset, Preset, PresetRule, RuleCondition } from '@domovoi/shared'
+import type { EffectivePreset, Preset, PresetRule, RuleCondition } from '@slipmat/shared'
 
 /**
  * Rule evaluation is a pure function of (preset, rules, now).

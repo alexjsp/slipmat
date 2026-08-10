@@ -1,5 +1,5 @@
 /**
- * The only interface the rest of Domovoi is allowed to talk to a speaker
+ * The only interface the rest of Slipmat is allowed to talk to a speaker
  * through. Two implementations exist: `RealSonosDriver` (UPnP, via
  * @svrooij/sonos) and `FakeSonosDriver` (tests).
  *

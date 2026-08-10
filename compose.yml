@@ -5,26 +5,26 @@
 #   - Sonos speakers dial back into our UPnP event callback URL
 #   - HomeKit (when enabled) advertises over mDNS
 services:
-  domovoi:
+  slipmat:
     build:
       context: .
       dockerfile: Dockerfile
-    image: domovoi:local
-    container_name: domovoi
+    image: slipmat:local
+    container_name: slipmat
     network_mode: host
     volumes:
-      - /mnt/user/appdata/domovoi:/data
+      - /mnt/user/appdata/slipmat:/data
     environment:
-      DOMOVOI_PORT: ${DOMOVOI_PORT:-5544}
-      DOMOVOI_DATA_DIR: /data
-      DOMOVOI_LOG_LEVEL: ${DOMOVOI_LOG_LEVEL:-info}
-      # Auth is optional: set DOMOVOI_PASSWORD in .env to require a login.
+      SLIPMAT_PORT: ${SLIPMAT_PORT:-5544}
+      SLIPMAT_DATA_DIR: /data
+      SLIPMAT_LOG_LEVEL: ${SLIPMAT_LOG_LEVEL:-info}
+      # Auth is optional: set SLIPMAT_PASSWORD in .env to require a login.
       # Left blank there is no login, which is a reasonable default on a trusted
       # LAN — Sonos has no auth of its own either.
-      DOMOVOI_PASSWORD: ${DOMOVOI_PASSWORD:-}
-      DOMOVOI_SESSION_SECRET: ${DOMOVOI_SESSION_SECRET:-}
+      SLIPMAT_PASSWORD: ${SLIPMAT_PASSWORD:-}
+      SLIPMAT_SESSION_SECRET: ${SLIPMAT_SESSION_SECRET:-}
       # Fallback if SSDP discovery is blocked; a single speaker IP is enough.
-      DOMOVOI_SEED_IP: ${DOMOVOI_SEED_IP:-}
-      DOMOVOI_HOMEKIT: ${DOMOVOI_HOMEKIT:-0}
-      DOMOVOI_HOMEKIT_PIN: ${DOMOVOI_HOMEKIT_PIN:-031-45-154}
+      SLIPMAT_SEED_IP: ${SLIPMAT_SEED_IP:-}
+      SLIPMAT_HOMEKIT: ${SLIPMAT_HOMEKIT:-0}
+      SLIPMAT_HOMEKIT_PIN: ${SLIPMAT_HOMEKIT_PIN:-031-45-154}
     restart: unless-stopped

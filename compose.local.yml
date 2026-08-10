@@ -1,22 +1,22 @@
 # Local container testing only.
 #
 # Docker Desktop on macOS has no real host networking, so SSDP discovery will
-# not work here — set DOMOVOI_SEED_IP to a known speaker address, and expect
+# not work here — set SLIPMAT_SEED_IP to a known speaker address, and expect
 # UPnP events to be unreliable. For day-to-day development run natively with
 # `just dev` instead.
 services:
-  domovoi:
+  slipmat:
     build:
       context: .
       dockerfile: Dockerfile
-    image: domovoi:local
+    image: slipmat:local
     ports:
       - '5544:5544'
     volumes:
       - ./data:/data
     environment:
-      DOMOVOI_DATA_DIR: /data
-      DOMOVOI_LOG_LEVEL: debug
-      DOMOVOI_SEED_IP: ${DOMOVOI_SEED_IP:-}
-      DOMOVOI_HOMEKIT: '0'
+      SLIPMAT_DATA_DIR: /data
+      SLIPMAT_LOG_LEVEL: debug
+      SLIPMAT_SEED_IP: ${SLIPMAT_SEED_IP:-}
+      SLIPMAT_HOMEKIT: '0'
     restart: unless-stopped

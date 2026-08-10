@@ -4,7 +4,7 @@
  * Tries variants against one named zone, clearing the queue between each, and
  * reports which Sonos accepts. Mutates only that zone's queue, at volume 0.
  *
- *   pnpm --filter @domovoi/server exec tsx scripts/probe-enqueue-batch.ts --zone "Alex's Office"
+ *   pnpm --filter @slipmat/server exec tsx scripts/probe-enqueue-batch.ts --zone "Alex's Office"
  */
 import { SonosManager } from '@svrooij/sonos'
 import Database from 'better-sqlite3'
@@ -50,7 +50,7 @@ type Track = { uri: string; metadata: string | null }
 
 async function main() {
   // Real tracks straight from the resolver cache.
-  const dbPath = arg('db') ?? '../../data/domovoi.db'
+  const dbPath = arg('db') ?? '../../data/slipmat.db'
   const db = new Database(dbPath, { readonly: true })
   const row = db.prepare('SELECT tracks_json FROM resolved_sources LIMIT 1').get() as {
     tracks_json: string

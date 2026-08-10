@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Trigger, TriggerInput, TriggerKind } from '@domovoi/shared'
+import type { Trigger, TriggerInput, TriggerKind } from '@slipmat/shared'
 import { asc, eq } from 'drizzle-orm'
 import type { Db } from '../db/index.js'
 import { presets, triggers } from '../db/schema.js'

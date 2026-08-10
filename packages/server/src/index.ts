@@ -22,7 +22,7 @@ async function main() {
   process.on('SIGINT', () => void shutdown('SIGINT'))
 
   await app.listen({ host: config.host, port: config.port })
-  logger.info({ host: config.host, port: config.port }, 'domovoi listening')
+  logger.info({ host: config.host, port: config.port }, 'slipmat listening')
 }
 
 main().catch((err) => {

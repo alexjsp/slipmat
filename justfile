@@ -8,21 +8,27 @@ install:
 # discovery and UPnP callbacks need real host networking.
 [no-exit-message]
 dev: install
-  pnpm --filter @domovoi/shared build
+  pnpm --filter @slipmat/shared build
   pnpm -r --parallel dev
 
 [no-exit-message]
 server:
-  pnpm --filter @domovoi/server dev
+  pnpm --filter @slipmat/server dev
 
 [no-exit-message]
 web:
-  pnpm --filter @domovoi/web dev
+  pnpm --filter @slipmat/web dev
 
 build:
-  pnpm --filter @domovoi/shared build
-  pnpm --filter @domovoi/server build
-  pnpm --filter @domovoi/web build
+  pnpm --filter @slipmat/shared build
+  pnpm --filter @slipmat/server build
+  pnpm --filter @slipmat/web build
+  # The server serves the SPA from its own `public/`, which the Dockerfile
+  # populates. Locally nothing did, so a stale copy could sit there for hours
+  # serving a UI that no longer matched the source — including, memorably, the
+  # old app name after a rename.
+  rm -rf packages/server/public
+  cp -R packages/web/dist packages/server/public
 
 # Tests run against the fake Sonos layer only — never a real household.
 test:

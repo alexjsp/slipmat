@@ -6,7 +6,7 @@ import type {
   PresetRuleInput,
   PresetSource,
   PresetZone,
-} from '@domovoi/shared'
+} from '@slipmat/shared'
 import { asc, eq } from 'drizzle-orm'
 import type { Db, DbTx } from '../db/index.js'
 import { presetRules, presetSources, presets, presetZones } from '../db/schema.js'

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import type { Group, SystemState, Track, Zone } from '@domovoi/shared'
+import type { Group, SystemState, Track, Zone } from '@slipmat/shared'
 import type { DriverTrack, SonosDriver } from '../sonos/driver.js'
 import { classifyPlaybackKind } from '../sonos/uris.js'
 

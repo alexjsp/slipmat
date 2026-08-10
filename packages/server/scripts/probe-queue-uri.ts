@@ -89,7 +89,7 @@ async function main() {
     console.log('\nWhat the library hands us (parsed TrackUri):')
     console.log(`  ${parsedTracks[0]?.TrackUri}`)
 
-    const db = new Database(arg('db') ?? '../../data/domovoi.db', { readonly: true })
+    const db = new Database(arg('db') ?? '../../data/slipmat.db', { readonly: true })
     const row = db.prepare('SELECT tracks_json FROM resolved_sources LIMIT 1').get() as
       | { tracks_json: string }
       | undefined

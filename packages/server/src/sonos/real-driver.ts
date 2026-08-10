@@ -111,7 +111,7 @@ export class RealSonosDriver implements SonosDriver {
 
     if (!found) {
       throw new Error(
-        'No Sonos devices found. Check that the container is on host networking, or set DOMOVOI_SEED_IP to a speaker address.',
+        'No Sonos devices found. Check that the container is on host networking, or set SLIPMAT_SEED_IP to a speaker address.',
       )
     }
 

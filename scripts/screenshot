@@ -28,13 +28,13 @@ fi
 cd "${ROOT_DIR}"
 
 echo "Building…"
-pnpm --filter @domovoi/shared build >/dev/null
-pnpm --filter @domovoi/server build >/dev/null
-pnpm --filter @domovoi/web build >/dev/null
+pnpm --filter @slipmat/shared build >/dev/null
+pnpm --filter @slipmat/server build >/dev/null
+pnpm --filter @slipmat/web build >/dev/null
 rm -rf packages/server/public
 cp -r packages/web/dist packages/server/public
 
-DOMOVOI_FAKE_SONOS=1 DOMOVOI_PORT="${PORT}" DOMOVOI_LOG_LEVEL=warn \
+SLIPMAT_FAKE_SONOS=1 SLIPMAT_PORT="${PORT}" SLIPMAT_LOG_LEVEL=warn \
   node packages/server/dist/index.js >/dev/null 2>&1 &
 SERVER_PID=$!
 trap 'kill "${SERVER_PID}" 2>/dev/null || true' EXIT

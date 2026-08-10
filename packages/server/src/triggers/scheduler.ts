@@ -1,4 +1,4 @@
-import type { ScheduleConfig, SleepTimerConfig, TvPausesMusicConfig } from '@domovoi/shared'
+import type { ScheduleConfig, SleepTimerConfig, TvPausesMusicConfig } from '@slipmat/shared'
 import type { Logger } from '../logger.js'
 import type { ActivationEngine } from '../presets/activate.js'
 import { pauseAllMusic } from '../presets/pause-all.js'

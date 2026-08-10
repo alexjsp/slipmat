@@ -1,4 +1,4 @@
-import type { ScheduleConfig } from '@domovoi/shared'
+import type { ScheduleConfig } from '@slipmat/shared'
 import { describe, expect, it } from 'vitest'
 import {
   describeSchedule,

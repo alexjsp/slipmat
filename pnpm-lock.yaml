@@ -17,7 +17,7 @@ importers:
 
   packages/server:
     dependencies:
-      '@domovoi/shared':
+      '@slipmat/shared':
         specifier: workspace:*
         version: link:../shared
       '@fastify/cookie':
@@ -88,7 +88,7 @@ importers:
 
   packages/web:
     dependencies:
-      '@domovoi/shared':
+      '@slipmat/shared':
         specifier: workspace:*
         version: link:../shared
       '@radix-ui/react-slot':

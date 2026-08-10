@@ -1,4 +1,4 @@
-import { triggerInputSchema } from '@domovoi/shared'
+import { triggerInputSchema } from '@slipmat/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { TriggerRepository } from '../triggers/repository.js'

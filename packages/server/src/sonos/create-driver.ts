@@ -6,7 +6,7 @@ import { RealSonosDriver } from './real-driver.js'
 
 export function createDriver(config: Config, logger: Logger): SonosDriver {
   if (config.fakeSonos) {
-    logger.warn('DOMOVOI_FAKE_SONOS is set — using the in-memory household, no real speakers')
+    logger.warn('SLIPMAT_FAKE_SONOS is set — using the in-memory household, no real speakers')
     // Seed a scenario worth looking at: a soundbar on TV audio (which pause-all
     // must skip) and a grouped pair playing from a queue.
     const fake = new FakeSonosDriver({ tvZoneIds: ['RINCON_LIVING01400'] })

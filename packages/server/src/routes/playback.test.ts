@@ -15,7 +15,7 @@ describe('playback routes', () => {
   beforeEach(async () => {
     driver = new FakeSonosDriver()
     app = await buildServer({
-      config: loadConfig({ DOMOVOI_LOG_LEVEL: 'error' }),
+      config: loadConfig({ SLIPMAT_LOG_LEVEL: 'error' }),
       logger: createLogger({ logLevel: 'error' }),
       driver,
     })

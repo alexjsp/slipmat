@@ -47,7 +47,7 @@ export function App() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-2xl flex-col">
       <header className="flex items-center justify-between gap-4 px-4 pt-4">
-        <h1 className="font-semibold text-xl tracking-tight">Domovoi</h1>
+        <h1 className="font-semibold text-xl tracking-tight">Slipmat</h1>
         <div className="flex items-center gap-3">
           {/* Working is the normal case and needs no announcing; only a problem
               is worth the user's attention. */}
@@ -94,7 +94,7 @@ export function App() {
           <p className="text-muted-foreground text-sm">Loading…</p>
         ) : !state.ready ? (
           <p className="text-muted-foreground text-sm">
-            No Sonos devices found yet. Check host networking, or set <code>DOMOVOI_SEED_IP</code>.
+            No Sonos devices found yet. Check host networking, or set <code>SLIPMAT_SEED_IP</code>.
           </p>
         ) : (
           <Switch>

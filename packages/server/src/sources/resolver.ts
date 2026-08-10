@@ -1,4 +1,4 @@
-import type { ResolutionMode, SourceKind } from '@domovoi/shared'
+import type { ResolutionMode, SourceKind } from '@slipmat/shared'
 import { MetaDataHelper } from '@svrooij/sonos'
 import type { Logger } from '../logger.js'
 import { buildTrackMetadata, extractCdudn } from '../sonos/didl.js'
@@ -253,7 +253,7 @@ export class SourceResolver {
    * on a scratch zone, read back the tracks Sonos expanded it into, then put
    * that zone's queue back exactly as it was.
    *
-   * This is the only path in Domovoi that mutates a speaker as a side effect of
+   * This is the only path in Slipmat that mutates a speaker as a side effect of
    * a read, which is why it is opt-in and restores what it touched.
    */
   private async expandContainer(

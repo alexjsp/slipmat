@@ -9,7 +9,7 @@ const { isAllowedHost, isPublicPath } = __testing
 
 describe('host allowlist', () => {
   it('accepts the ways someone actually reaches a LAN service', () => {
-    for (const host of ['localhost:5544', 'domovoi.local', '192.168.1.50:5544', 'unraid.ts.net']) {
+    for (const host of ['localhost:5544', 'slipmat.local', '192.168.1.50:5544', 'unraid.ts.net']) {
       expect(isAllowedHost(host, [])).toBe(true)
     }
   })
@@ -21,7 +21,7 @@ describe('host allowlist', () => {
   })
 
   it('accepts a hostname the operator has allowlisted', () => {
-    expect(isAllowedHost('domovoi.jsp.scot', ['domovoi.jsp.scot'])).toBe(true)
+    expect(isAllowedHost('slipmat.jsp.scot', ['slipmat.jsp.scot'])).toBe(true)
   })
 })
 
@@ -45,9 +45,9 @@ describe('authentication', () => {
   const build = async (env: Record<string, string> = {}) => {
     const app = await buildServer({
       config: loadConfig({
-        DOMOVOI_LOG_LEVEL: 'error',
-        DOMOVOI_FAKE_SONOS: '1',
-        DOMOVOI_DATA_DIR: ':memory:',
+        SLIPMAT_LOG_LEVEL: 'error',
+        SLIPMAT_FAKE_SONOS: '1',
+        SLIPMAT_DATA_DIR: ':memory:',
         ...env,
       }),
       logger: createLogger({ logLevel: 'error' }),
@@ -70,12 +70,12 @@ describe('authentication', () => {
   })
 
   it('guards the API once a password is set', async () => {
-    const app = await build({ DOMOVOI_PASSWORD: 'hunter2', DOMOVOI_SESSION_SECRET: 'x'.repeat(32) })
+    const app = await build({ SLIPMAT_PASSWORD: 'hunter2', SLIPMAT_SESSION_SECRET: 'x'.repeat(32) })
     expect((await app.inject({ method: 'GET', url: '/api/system' })).statusCode).toBe(401)
   })
 
   it('lets a correct password through and keeps the session', async () => {
-    const app = await build({ DOMOVOI_PASSWORD: 'hunter2', DOMOVOI_SESSION_SECRET: 'x'.repeat(32) })
+    const app = await build({ SLIPMAT_PASSWORD: 'hunter2', SLIPMAT_SESSION_SECRET: 'x'.repeat(32) })
 
     const bad = await app.inject({
       method: 'POST',
@@ -103,7 +103,7 @@ describe('authentication', () => {
   })
 
   it('still lets webhooks fire when auth is on', async () => {
-    const app = await build({ DOMOVOI_PASSWORD: 'hunter2', DOMOVOI_SESSION_SECRET: 'x'.repeat(32) })
+    const app = await build({ SLIPMAT_PASSWORD: 'hunter2', SLIPMAT_SESSION_SECRET: 'x'.repeat(32) })
     const token = (await app.inject({ method: 'GET', url: '/api/pause-all/token' })).json()
     // The token endpoint itself is guarded, so this proves the guard is on…
     expect(token.error).toBe('unauthorized')

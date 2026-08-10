@@ -5,8 +5,8 @@
  * an explicit --zone, defaults to read-only recon, and only mutates when
  * --expand is passed with a container URL.
  *
- *   pnpm --filter @domovoi/server exec tsx scripts/spike-expansion.ts --recon
- *   pnpm --filter @domovoi/server exec tsx scripts/spike-expansion.ts \
+ *   pnpm --filter @slipmat/server exec tsx scripts/spike-expansion.ts --recon
+ *   pnpm --filter @slipmat/server exec tsx scripts/spike-expansion.ts \
  *     --zone "Alex's Office" --expand "https://open.spotify.com/playlist/…" --silent
  *
  * --silent sets the zone's volume to 0 for the duration and restores it after,

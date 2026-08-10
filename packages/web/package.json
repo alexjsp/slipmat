@@ -1,5 +1,5 @@
 {
-  "name": "@domovoi/web",
+  "name": "@slipmat/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "echo 'no tests in web yet' && exit 0"
   },
   "dependencies": {
-    "@domovoi/shared": "workspace:*",
+    "@slipmat/shared": "workspace:*",
     "@radix-ui/react-slot": "^1.2.4",
     "@tanstack/react-query": "^5.101.4",
     "class-variance-authority": "^0.7.1",
