@@ -189,11 +189,26 @@ export class ActivationEngine {
     // left until after, because Sonos serialises topology changes across the
     // household: joins in flight put the coordinator's own commands behind
     // them, and `setCrossfade` measured 22s waiting its turn.
-    // This one *is* waited for. Skipping it looked free — it saves the 1.8s
-    // Sonos takes to report the coordinator as standalone — but the transport
-    // calls that follow then race the group change, and roughly one activation
-    // in three came up STOPPED with a track loaded. Measured, not theorised.
-    await this.applyGrouping(coordinator.zoneId, [coordinator.zoneId], warnings)
+    // Breaking the coordinator out of its group costs ~3.2s and is usually
+    // pointless. Re-running a preset is the common case — the HomeKit switch,
+    // a schedule, a webhook retry — and the coordinator is already coordinating
+    // exactly those rooms. Tearing that down to rebuild it identically is the
+    // single most expensive thing an activation used to do.
+    //
+    // It is still done when the coordinator is following someone else, or when
+    // its group holds a room this preset does not want, since those need
+    // undoing. This one is waited for: skipping the wait saves 1.8s and makes
+    // the transport calls race the group change, which left about one
+    // activation in three STOPPED with a track loaded. Measured, not theorised.
+    const currentGroup = snapshot.groups.find(
+      (group) => group.coordinatorZoneId === coordinator.zoneId,
+    )
+    const wanted = new Set(memberZoneIds)
+    const alreadyRight =
+      !!currentGroup && currentGroup.memberZoneIds.every((zoneId) => wanted.has(zoneId))
+    if (!alreadyRight) {
+      await this.applyGrouping(coordinator.zoneId, [coordinator.zoneId], warnings)
+    }
     took('group')
 
     // The coordinator keeps its own volume through a join, so this one sticks.

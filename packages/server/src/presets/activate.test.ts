@@ -135,6 +135,39 @@ describe('ActivationEngine', () => {
     expect(coordinatorVolumeIndex).toBeLessThan(joinIndex)
   })
 
+  it('does not tear down a group that is already the one it wants', async () => {
+    // Re-running a preset is the common case, and rebuilding an identical group
+    // was 3.2s of dead time before a note played.
+    const preset = create()
+    await engine.activate(preset)
+    await settle()
+    driver.calls.length = 0
+
+    await engine.activate(preset, { restart: true })
+    await settle()
+
+    expect(driver.calls.some((call) => call.method === 'leaveGroup')).toBe(false)
+    const group = driver.snapshot().groups.find((g) => g.coordinatorZoneId === KITCHEN)
+    expect(group?.memberZoneIds.sort()).toEqual([BEDROOM, KITCHEN])
+    expect(group?.transportState).toBe('PLAYING')
+  })
+
+  it('does tear down a group holding a room the preset does not want', async () => {
+    const preset = create()
+    await engine.activate(preset)
+    await settle()
+    await driver.joinGroup(KITCHEN, [OFFICE])
+    driver.calls.length = 0
+
+    await engine.activate(preset, { restart: true })
+    await settle()
+
+    // The stray room has to go, and only a teardown removes it.
+    expect(driver.calls.some((call) => call.method === 'leaveGroup')).toBe(true)
+    const group = driver.snapshot().groups.find((g) => g.coordinatorZoneId === KITCHEN)
+    expect(group?.memberZoneIds.sort()).toEqual([BEDROOM, KITCHEN])
+  })
+
   it('leaves a speaker that never joined muted, and says so', async () => {
     // The bug this replaces: the mute was lifted unconditionally, so a speaker
     // that failed to join went back to being audible playing its own music.
