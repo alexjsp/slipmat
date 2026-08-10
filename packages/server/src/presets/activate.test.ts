@@ -110,20 +110,44 @@ describe('ActivationEngine', () => {
     expect(group?.transportState).toBe('PLAYING')
   })
 
-  it('sets per-zone volumes after grouping, not before', async () => {
+  it("sets a follower's volume only after it has joined", async () => {
     const preset = create()
     await engine.activate(preset)
+    // Followers join behind playback now, and take their volume once they have.
+    await settle()
 
     const zones = driver.snapshot().zones
     expect(zones.find((z) => z.id === KITCHEN)?.volume).toBe(30)
     expect(zones.find((z) => z.id === BEDROOM)?.volume).toBe(15)
 
-    // Ordering matters: a join resets member volumes, so any setVolume issued
-    // before the join would be silently undone.
+    // Joining resets a follower's volume, so setting it earlier is silently
+    // undone. The coordinator keeps its own through a join, and is set up front
+    // so the room you hear first is at the right volume immediately.
     const joinIndex = driver.calls.findIndex((call) => call.method === 'joinGroup')
-    const firstVolumeIndex = driver.calls.findIndex((call) => call.method === 'setVolume')
+    const followerVolumeIndex = driver.calls.findIndex(
+      (call) => call.method === 'setVolume' && call.args[0] === BEDROOM,
+    )
+    const coordinatorVolumeIndex = driver.calls.findIndex(
+      (call) => call.method === 'setVolume' && call.args[0] === KITCHEN,
+    )
     expect(joinIndex).toBeGreaterThanOrEqual(0)
-    expect(firstVolumeIndex).toBeGreaterThan(joinIndex)
+    expect(followerVolumeIndex).toBeGreaterThan(joinIndex)
+    expect(coordinatorVolumeIndex).toBeLessThan(joinIndex)
+  })
+
+  it('leaves a speaker that never joined muted, and says so', async () => {
+    // The bug this replaces: the mute was lifted unconditionally, so a speaker
+    // that failed to join went back to being audible playing its own music.
+    driver.setBrowseResult('SQ:1', [track('jazz-1')])
+    const preset = create()
+    driver.failJoinFor(BEDROOM)
+
+    await engine.activate(preset)
+    await settle()
+
+    expect(driver.snapshot().zones.find((z) => z.id === BEDROOM)?.muted).toBe(true)
+    const activation = engine.liveActivation(preset.id)
+    expect(JSON.parse(activation?.warningsJson ?? '[]').join(' ')).toMatch(/did not join/)
   })
 
   it('queues every source and leaves the interleaving to Sonos shuffle', async () => {
@@ -466,6 +490,7 @@ describe('ActivationEngine', () => {
       ])
 
       await e.activate(preset)
+      await settle()
 
       expect(driver.queueOf(KITCHEN).every((uri) => uri.startsWith('rock'))).toBe(true)
       const zones = driver.snapshot().zones

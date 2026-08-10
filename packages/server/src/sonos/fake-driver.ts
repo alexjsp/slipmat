@@ -71,6 +71,7 @@ export class FakeSonosDriver implements SonosDriver {
   private readonly containers = new Map<string, DriverBrowseItem[]>()
   private readonly browseTree = new Map<string, DriverBrowseItem[]>()
   private readonly playModes = new Map<string, DriverPlayMode>()
+  private readonly refuseJoin = new Set<string>()
 
   constructor(options: FakeSonosDriverOptions = {}) {
     const zones = options.zones ?? DEFAULT_ZONES
@@ -238,16 +239,23 @@ export class FakeSonosDriver implements SonosDriver {
     // The fake applies grouping synchronously; there is nothing to settle.
   }
 
-  async joinGroup(coordinatorZoneId: string, zoneIds: string[]): Promise<void> {
+  async joinGroup(
+    coordinatorZoneId: string,
+    zoneIds: string[],
+    options: { makeStandalone?: boolean } = {},
+  ): Promise<void> {
     this.record('joinGroup', coordinatorZoneId, zoneIds)
     this.requireZone(coordinatorZoneId)
-    await this.leaveGroup([coordinatorZoneId])
+    if (options.makeStandalone !== false) await this.leaveGroup([coordinatorZoneId])
 
     const target = this.groups.find((g) => g.coordinatorZoneId === coordinatorZoneId)
     if (!target) throw new Error(`Zone ${coordinatorZoneId} did not become a coordinator`)
 
     for (const zoneId of zoneIds) {
       if (zoneId === coordinatorZoneId) continue
+      // A refused join is silent, as it is on real hardware: the other members
+      // arrive and this one simply is not there.
+      if (this.refuseJoin.has(zoneId)) continue
       this.requireZone(zoneId)
       this.detach(zoneId)
       target.memberZoneIds.push(zoneId)
@@ -408,6 +416,17 @@ export class FakeSonosDriver implements SonosDriver {
     const zone = this.zones.get(zoneId)
     if (zone) zone.unreachable = unreachable
     this.changed()
+  }
+
+  /**
+   * Make one zone refuse to join a group.
+   *
+   * Models the real failure that matters: Sonos accepts the command for the
+   * other members and this one simply never arrives, so anything that assumed
+   * the whole group formed is wrong about it.
+   */
+  failJoinFor(zoneId: string) {
+    this.refuseJoin.add(zoneId)
   }
 
   /** Drive the transport state directly — TRANSITIONING has no other route. */

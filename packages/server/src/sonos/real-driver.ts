@@ -522,12 +522,12 @@ export class RealSonosDriver implements SonosDriver {
   async joinGroup(
     coordinatorZoneId: string,
     zoneIds: string[],
-    options: { settle?: boolean } = {},
+    options: { settle?: boolean; makeStandalone?: boolean } = {},
   ): Promise<void> {
-    // The coordinator must own its own group before anyone can follow it —
-    // but only the *command* has to precede the joins, not Sonos getting round
-    // to reporting it.
-    await this.leaveGroup([coordinatorZoneId], options)
+    // The coordinator must own its own group before anyone can follow it — but
+    // not if it is already playing, because becoming a standalone coordinator
+    // stops playback. Callers that started the music first pass false.
+    if (options.makeStandalone !== false) await this.leaveGroup([coordinatorZoneId], options)
 
     // In parallel, and measured: telling one speaker to follow another takes
     // ~2.6s, because Sonos does not answer until the speaker has actually torn

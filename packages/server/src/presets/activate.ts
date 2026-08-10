@@ -185,7 +185,15 @@ export class ActivationEngine {
     )
     took('muteFollowers')
 
-    await this.applyGrouping(coordinator.zoneId, memberZoneIds, warnings, { settle: false })
+    // Only the coordinator is set up before playback. Joining the followers is
+    // left until after, because Sonos serialises topology changes across the
+    // household: joins in flight put the coordinator's own commands behind
+    // them, and `setCrossfade` measured 22s waiting its turn.
+    // This one *is* waited for. Skipping it looked free — it saves the 1.8s
+    // Sonos takes to report the coordinator as standalone — but the transport
+    // calls that follow then race the group change, and roughly one activation
+    // in three came up STOPPED with a track loaded. Measured, not theorised.
+    await this.applyGrouping(coordinator.zoneId, [coordinator.zoneId], warnings)
     took('group')
 
     // The coordinator keeps its own volume through a join, so this one sticks.
@@ -288,13 +296,14 @@ export class ActivationEngine {
       warnings,
     })
 
-    // Everything the followers need happens behind the music.
-    void this.settleFollowers(
+    // The other rooms join music that is already playing.
+    void this.joinFollowers(
+      activationId,
       coordinator.zoneId,
       members
         .filter((zone) => zone.zoneId !== coordinator.zoneId)
         .map((zone) => ({ ...zone, volume: volumeByZone.get(zone.zoneId) ?? zone.volume })),
-    ).catch((err) => this.logger.warn({ err, presetId: preset.id }, 'failed to settle followers'))
+    ).catch((err) => this.logger.warn({ err, presetId: preset.id }, 'failed to join followers'))
 
     // The rest fills in behind playback.
     void this.fillQueue(activationId, coordinator.zoneId, tail, {
@@ -455,36 +464,75 @@ export class ActivationEngine {
    * people their preset was broken when it was playing correctly.
    */
   /**
-   * Bring the followers up once the group exists: correct volume, then sound.
+   * Bring the other rooms in behind the music.
    *
-   * Runs behind playback, so the coordinator is already audible. Unmuting is in
-   * a `finally` because a member left muted is worse than one at the wrong
-   * volume — the first is silent all evening, the second is a slider away.
+   * A follower is only unmuted once Sonos confirms it is actually in the group.
+   * Unmuting unconditionally is a bug I shipped: when a join failed, the mute
+   * was lifted on a speaker that had never joined, so it went back to being
+   * audible playing whatever it had been playing before the preset started.
+   * A room the preset claimed and failed to get is better left silent.
    */
-  private async settleFollowers(
+  private async joinFollowers(
+    activationId: string,
     coordinatorZoneId: string,
     followers: { zoneId: string; zoneName: string; volume: number }[],
   ) {
     if (followers.length === 0) return
-    try {
-      await this.deps.driver.awaitGrouping(
-        coordinatorZoneId,
-        followers.map((zone) => zone.zoneId),
-      )
-      await Promise.all(
-        followers.map((zone) =>
-          this.deps.driver.setVolume(zone.zoneId, zone.volume).catch((err) => {
-            this.logger.warn({ err, zoneId: zone.zoneId }, 'volume failed')
-          }),
-        ),
-      )
-    } finally {
-      await Promise.all(
-        followers.map((zone) =>
-          this.deps.driver.setMute(zone.zoneId, false).catch(() => undefined),
-        ),
-      )
+    const zoneIds = followers.map((zone) => zone.zoneId)
+
+    // Parallel, and measured: one join takes ~2.6s because Sonos does not answer
+    // until the speaker has torn down what it was doing. Sequentially that is
+    // eight seconds for a four-room preset.
+    // The coordinator is already standalone and already playing; making it
+    // standalone again here stops it. That is what left activations sitting at
+    // STOPPED with a track loaded, roughly half the time.
+    await this.deps.driver
+      .joinGroup(coordinatorZoneId, zoneIds, { makeStandalone: false })
+      .catch((err) => {
+        this.logger.warn({ err, coordinatorZoneId }, 'joining followers failed')
+      })
+
+    const group = this.deps.driver
+      .snapshot()
+      .groups.find((candidate) => candidate.coordinatorZoneId === coordinatorZoneId)
+    const joined = new Set(group?.memberZoneIds ?? [])
+
+    const stranded: string[] = []
+    for (const zone of followers) {
+      if (!joined.has(zone.zoneId)) {
+        stranded.push(zone.zoneName)
+        continue
+      }
+      // Volume after the join, never before: joining resets it.
+      await this.deps.driver.setVolume(zone.zoneId, zone.volume).catch((err) => {
+        this.logger.warn({ err, zoneId: zone.zoneId }, 'volume failed')
+      })
+      await this.deps.driver.setMute(zone.zoneId, false).catch(() => undefined)
     }
+
+    if (stranded.length > 0) {
+      this.logger.warn({ coordinatorZoneId, stranded }, 'speakers never joined; left muted')
+      this.addWarnings(activationId, [
+        `${stranded.join(', ')} did not join and ${stranded.length === 1 ? 'is' : 'are'} left silent`,
+      ])
+    }
+  }
+
+  /** Append to an activation's warnings after the fact, for anything late. */
+  private addWarnings(activationId: string, extra: string[]) {
+    const row = this.deps.db
+      .select()
+      .from(activations)
+      .where(eq(activations.id, activationId))
+      .get()
+    if (!row) return
+    const existing = JSON.parse(row.warningsJson) as string[]
+    this.deps.db
+      .update(activations)
+      .set({ warningsJson: JSON.stringify([...existing, ...extra]) })
+      .where(eq(activations.id, activationId))
+      .run()
+    this.deps.store.refresh()
   }
 
   private async applyGrouping(

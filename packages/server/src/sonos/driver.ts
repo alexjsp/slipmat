@@ -115,7 +115,17 @@ export interface SonosDriver {
   joinGroup(
     coordinatorZoneId: string,
     zoneIds: string[],
-    options?: { settle?: boolean },
+    options?: {
+      settle?: boolean
+      /**
+       * Skip breaking the coordinator out into its own group first.
+       *
+       * Required when it is already playing: the call that makes a speaker a
+       * standalone coordinator stops whatever it is playing, so a caller that
+       * has already started the music must not have it done again underneath.
+       */
+      makeStandalone?: boolean
+    },
   ): Promise<void>
   /** Wait until Sonos reports `zoneIds` as members of the coordinator's group. */
   awaitGrouping(coordinatorZoneId: string, zoneIds: string[]): Promise<void>
