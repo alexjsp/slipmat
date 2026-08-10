@@ -136,3 +136,12 @@ describe('buildTrackMetadata', () => {
     expect(buildTrackMetadata({ uri: 'x-file-cifs://nas/track.flac', title: 'Local' })).toBeNull()
   })
 })
+
+describe('serviceItemId extension handling', () => {
+  it('keeps a numeric id when the URI carries no extension', () => {
+    // `\.[a-z0-9]+$` would truncate this to `…librarytrack%3aa`.
+    expect(serviceItemId('x-sonos-http:librarytrack%3aa.1887686006?sid=204')).toBe(
+      '10032020librarytrack%3aa.1887686006',
+    )
+  })
+})

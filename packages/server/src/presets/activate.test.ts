@@ -56,6 +56,9 @@ describe('ActivationEngine', () => {
   let engine: ActivationEngine
   let repo: PresetRepository
   let zoneNames: Map<string, string>
+  let db: ReturnType<typeof openDatabase>
+  let store: SystemStateStore
+  let cache: SourceCache
 
   beforeEach(async () => {
     driver = new FakeSonosDriver({ tvZoneIds: [LIVING] })
@@ -64,10 +67,10 @@ describe('ActivationEngine', () => {
     driver.setBrowseResult('SQ:1', [track('jazz-1'), track('jazz-2'), track('jazz-3')])
     driver.setBrowseResult('SQ:2', [track('rock-1'), track('rock-2'), track('rock-3')])
 
-    const db = openDatabase({ inMemory: true })
-    const store = new SystemStateStore(driver)
+    db = openDatabase({ inMemory: true })
+    store = new SystemStateStore(driver)
     const resolver = new SourceResolver({ driver, logger, allowScratchQueueExpansion: true })
-    const cache = new SourceCache(db, resolver, logger)
+    cache = new SourceCache(db, resolver, logger)
 
     repo = new PresetRepository(db)
     engine = new ActivationEngine({
@@ -457,6 +460,41 @@ describe('ActivationEngine', () => {
       const preset = create()
       await engine.activate(preset)
       expect(engine.isStillPlaying(preset.id)).toBe(true)
+    })
+
+    it('does not retire an activation the speaker has not caught up with yet', async () => {
+      // Reconcile runs on every state change, and activation itself causes
+      // several — grouping, volumes, crossfade — before Play is even called.
+      // Answering "is it playing?" during that window killed every activation
+      // milliseconds after it was created, and nothing revives one.
+      const preset = create()
+      await engine.activate(preset)
+      await driver.pause(KITCHEN)
+
+      engine.reconcile()
+
+      expect(engine.liveActivation(preset.id)).toBeDefined()
+    })
+
+    it('retires it once the grace period has passed and it is still not playing', async () => {
+      const preset = create()
+      await engine.activate(preset)
+      await driver.pause(KITCHEN)
+
+      // Same engine, an unhurried clock.
+      const later = new ActivationEngine({
+        db,
+        driver,
+        store,
+        cache,
+        logger,
+        repo,
+        timeZone: 'UTC',
+        now: () => new Date(Date.now() + 60_000),
+      })
+      later.reconcile()
+
+      expect(later.liveActivation(preset.id)).toBeUndefined()
     })
 
     it('survives a skip to another track we queued', async () => {

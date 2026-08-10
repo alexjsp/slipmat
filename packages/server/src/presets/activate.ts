@@ -5,7 +5,7 @@ import type { Db } from '../db/index.js'
 import { activations } from '../db/schema.js'
 import type { Logger } from '../logger.js'
 import type { SonosDriver } from '../sonos/driver.js'
-import { classifyPlaybackKind, isProtectedFromPauseAll } from '../sonos/uris.js'
+import { classifyPlaybackKind, isProtectedFromPauseAll, trackIdentity } from '../sonos/uris.js'
 import type { SourceCache } from '../sources/cache.js'
 import type { ResolvedTrack, ResolveOptions } from '../sources/resolver.js'
 import type { SystemStateStore } from '../state/store.js'
@@ -20,6 +20,14 @@ import { buildQueue } from './shuffle.js'
  * several seconds of silence after a button press and a HomeKit timeout.
  */
 const FAST_START_TRACKS = 20
+
+/**
+ * How long an activation is left alone before reconciliation may retire it.
+ *
+ * Sonos reaches PLAYING with a current track a beat after `Play` returns, so
+ * anything shorter than this races the speaker it is asking about.
+ */
+const SETTLE_GRACE_MS = 10_000
 
 export type ActivationDeps = {
   db: Db
@@ -271,13 +279,29 @@ export class ActivationEngine {
 
     if (activation.streamUri) return group.transportUri === activation.streamUri
 
-    const uris = new Set(JSON.parse(activation.trackUrisJson) as string[])
-    return !!group.currentTrackUri && uris.has(group.currentTrackUri)
+    // Compared by item identity, not by URI: Sonos swaps the scheme once it has
+    // resolved a track against its service, so what comes back out of the queue
+    // is never the string we put in.
+    const queued = new Set(
+      (JSON.parse(activation.trackUrisJson) as string[])
+        .map(trackIdentity)
+        .filter((identity): identity is string => identity !== null),
+    )
+    const playing = trackIdentity(group.currentTrackUri)
+    return !!playing && queued.has(playing)
   }
 
   /** Drop activations whose reality no longer matches, so switches go off. */
   reconcile(): void {
+    const now = this.now().getTime()
     for (const activation of this.liveActivations()) {
+      // A just-started activation has not had time to become true yet. Grouping
+      // and volume changes each emit an event, and reconcile runs on every one
+      // of them — all while the coordinator is still TRANSITIONING with no
+      // current track. Without this the activation is marked dead within
+      // milliseconds of being created, and no later event ever revives it.
+      const age = now - new Date(activation.startedAt).getTime()
+      if (age < SETTLE_GRACE_MS) continue
       if (!this.isStillPlaying(activation.presetId)) this.markStopped(activation.id)
     }
   }

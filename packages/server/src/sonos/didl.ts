@@ -136,7 +136,9 @@ const TRACK_ID_PREFIX = '10032020'
 export function serviceItemId(uri: string): string | null {
   if (!uri.startsWith('x-sonos-http:')) return null
   const path = uri.slice('x-sonos-http:'.length).split('?')[0] ?? ''
-  const withoutExtension = path.replace(/\.[a-z0-9]+$/i, '')
+  // Named extensions only: an Apple Music id ends in digits, so a greedy
+  // `\.[a-z0-9]+$` would truncate `librarytrack%3aa.1887686006` to `…a`.
+  const withoutExtension = path.replace(/\.(mp3|mp4|m4a|aac|flac|ogg|wav|wma)$/i, '')
   return withoutExtension ? `${TRACK_ID_PREFIX}${withoutExtension}` : null
 }
 

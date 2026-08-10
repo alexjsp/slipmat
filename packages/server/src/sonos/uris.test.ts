@@ -5,6 +5,7 @@ import {
   isProtectedFromPauseAll,
   isRadioStream,
   queueUriFor,
+  trackIdentity,
 } from './uris.js'
 
 describe('classifyPlaybackKind', () => {
@@ -79,5 +80,51 @@ describe('duration parsing', () => {
     expect(parseDuration('NOT_IMPLEMENTED')).toBeNull()
     expect(parseDuration('0:00:00')).toBeNull()
     expect(parseDuration(undefined)).toBeNull()
+  })
+})
+
+describe('trackIdentity', () => {
+  it('matches a queued track against the URI Sonos plays it back as', () => {
+    // Sonos resolves the item against Apple Music and swaps the delivery
+    // scheme, so the string that comes back is never the one we enqueued.
+    const enqueued = 'x-sonos-http:librarytrack%3aa.1887686006.mp4?sid=204&flags=8232&sn=2'
+    const playing = 'x-sonosapi-hls-static:librarytrack:a.1887686006?sid=204&flags=8232&sn=2'
+    expect(trackIdentity(enqueued)).toBe(trackIdentity(playing))
+  })
+
+  it('still tells two different tracks apart', () => {
+    expect(trackIdentity('x-sonos-http:librarytrack%3aa.1.mp4?sid=204')).not.toBe(
+      trackIdentity('x-sonos-http:librarytrack%3aa.2.mp4?sid=204'),
+    )
+  })
+
+  it('has nothing to say about an absent URI', () => {
+    expect(trackIdentity(null)).toBeNull()
+    expect(trackIdentity('')).toBeNull()
+  })
+
+  it('survives a stray percent that is not an escape', () => {
+    expect(trackIdentity('x-file-cifs://nas/100%.flac')).toBe('//nas/100%')
+  })
+})
+
+describe('HLS delivery is not radio', () => {
+  it('treats a static HLS asset as an ordinary track', () => {
+    // Fixed-length, seekable, has a duration — a track that happens to be
+    // segmented. Classifying it as radio makes a preset queue unseekable.
+    expect(isRadioStream('x-sonosapi-hls-static:librarytrack%3aa.123?sid=204')).toBe(false)
+  })
+
+  it('still treats live HLS as radio', () => {
+    expect(isRadioStream('x-sonosapi-hls:some-station?sid=204')).toBe(true)
+  })
+
+  it('calls a group pointed at its own queue a queue, whatever the track scheme', () => {
+    expect(
+      classifyPlaybackKind(
+        'x-rincon-queue:RINCON_1234#0',
+        'x-sonosapi-hls-static:librarytrack%3aa.123?sid=204',
+      ),
+    ).toBe('queue')
   })
 })
