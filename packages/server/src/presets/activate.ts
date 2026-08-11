@@ -45,9 +45,14 @@ const FAST_START_MAX_TRACKS = 100
  * Each of these makes Sonos expand a container, which is real work for the
  * household. Running them back to back, on top of grouping, is what turned a
  * four-second activation into a thirty-four-second one with speakers dropping
- * out. Nobody is waiting on these — the music is already playing.
+ * out.
+ *
+ * Five seconds because that is what worked in the shell script this replaces —
+ * a number with a household behind it, rather than the half-second I had
+ * guessed at. Nobody is waiting on it: the music is already playing, and this
+ * only paces the sources queued behind the first one.
  */
-const QUEUE_COMMAND_GAP_MS = 500
+const QUEUE_COMMAND_GAP_MS = 5000
 
 export type ActivationDeps = {
   db: Db
@@ -712,9 +717,11 @@ export class ActivationEngine {
         return
       }
       await this.enqueueSource(zoneId, source)
-      // A gap between queue commands, for the same reason as everywhere else.
+      // Between commands, not after the last one — at five seconds a trailing
+      // pause is five seconds of holding up the dedupe and the shuffle.
       const gap = this.deps.queueGapMs ?? QUEUE_COMMAND_GAP_MS
-      if (gap > 0) await new Promise((resolve) => setTimeout(resolve, gap))
+      const isLast = source === sources[sources.length - 1]
+      if (gap > 0 && !isLast) await new Promise((resolve) => setTimeout(resolve, gap))
     }
     if (!this.isLive(activationId)) return
 
