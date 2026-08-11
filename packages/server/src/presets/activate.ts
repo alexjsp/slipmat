@@ -394,9 +394,9 @@ export class ActivationEngine {
   }
 
   /**
-   * The "loose" active-state test: right speakers, still playing, still playing
-   * something we queued. Survives skips and an extra speaker joining; goes false
-   * on pause, stop, or the queue being replaced.
+   * The "loose" active-state test: the coordinator is still playing something
+   * we queued. Survives skips, a speaker joining or leaving, and a wind-down to
+   * fewer rooms; goes false on pause, stop, or the queue being replaced.
    */
   isStillPlaying(presetId: string): boolean {
     const activation = this.liveActivation(presetId)
@@ -414,9 +414,13 @@ export class ActivationEngine {
       return false
     }
 
-    const members = new Set(group.memberZoneIds)
-    const expected = JSON.parse(activation.memberZoneIdsJson) as string[]
-    if (!expected.every((zoneId) => members.has(zoneId))) return false
+    // Deliberately no check that every zone the preset asked for is still in
+    // the group. The music lives on the coordinator, and whether some other
+    // room is currently along for the ride says nothing about whether this
+    // preset is playing. Requiring all of them was silently fatal: one speaker
+    // that failed to join made this false forever, so reconciliation retired an
+    // activation whose music was playing all night — taking the wind-down, the
+    // sleep timer and the HomeKit switch with it.
 
     if (activation.streamUri) return group.transportUri === activation.streamUri
 
@@ -507,14 +511,26 @@ export class ActivationEngine {
         this.logger.warn({ err, coordinatorZoneId }, 'joining followers failed')
       })
 
-    const group = this.deps.driver
-      .snapshot()
-      .groups.find((candidate) => candidate.coordinatorZoneId === coordinatorZoneId)
-    const joined = new Set(group?.memberZoneIds ?? [])
+    // Four joins landing at once can outrun the topology settle, and a speaker
+    // that is merely late must not be written off as absent — being written off
+    // means staying muted all evening. So ask again, and ask it to join again,
+    // before concluding anything.
+    let missing = this.notInGroup(coordinatorZoneId, followers)
+    if (missing.length > 0) {
+      await this.deps.driver
+        .joinGroup(
+          coordinatorZoneId,
+          missing.map((zone) => zone.zoneId),
+          { makeStandalone: false },
+        )
+        .catch((err) => this.logger.warn({ err, coordinatorZoneId }, 'retrying joins failed'))
+      missing = this.notInGroup(coordinatorZoneId, followers)
+    }
 
+    const late = new Set(missing.map((zone) => zone.zoneId))
     const stranded: string[] = []
     for (const zone of followers) {
-      if (!joined.has(zone.zoneId)) {
+      if (late.has(zone.zoneId)) {
         stranded.push(zone.zoneName)
         continue
       }
@@ -531,6 +547,14 @@ export class ActivationEngine {
         `${stranded.join(', ')} did not join and ${stranded.length === 1 ? 'is' : 'are'} left silent`,
       ])
     }
+  }
+
+  private notInGroup<T extends { zoneId: string }>(coordinatorZoneId: string, zones: T[]): T[] {
+    const group = this.deps.driver
+      .snapshot()
+      .groups.find((candidate) => candidate.coordinatorZoneId === coordinatorZoneId)
+    const joined = new Set(group?.memberZoneIds ?? [])
+    return zones.filter((zone) => !joined.has(zone.zoneId))
   }
 
   /** Append to an activation's warnings after the fact, for anything late. */

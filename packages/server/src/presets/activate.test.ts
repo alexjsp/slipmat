@@ -861,10 +861,24 @@ describe('ActivationEngine', () => {
       expect(engine.isStillPlaying(preset.id)).toBe(false)
     })
 
-    it('goes inactive when a preset speaker is taken away', async () => {
+    it('stays active when a speaker leaves, because the music has not stopped', async () => {
+      // Requiring every speaker was silently fatal: one that failed to join
+      // made this false forever, so reconciliation retired an activation whose
+      // music played all night — and with it the wind-down and sleep timer.
       const preset = create()
       await engine.activate(preset)
+      await settle()
       await driver.leaveGroup([BEDROOM])
+
+      expect(engine.isStillPlaying(preset.id)).toBe(true)
+    })
+
+    it('still goes inactive when the coordinator itself stops', async () => {
+      const preset = create()
+      await engine.activate(preset)
+      await settle()
+      await driver.pause(KITCHEN)
+
       expect(engine.isStillPlaying(preset.id)).toBe(false)
     })
 

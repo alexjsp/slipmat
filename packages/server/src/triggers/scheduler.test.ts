@@ -322,6 +322,35 @@ describe('Scheduler', () => {
   })
 
   describe('group shrink', () => {
+    it('still fires when a speaker failed to join at activation', async () => {
+      // Exactly what happened on the household: Kitchen and one other never
+      // joined, the activation was judged not playing and retired, and the
+      // wind-down never ran — while the music played all night.
+      const preset = presets.create(
+        {
+          ...presetInput(),
+          name: 'Bedtime',
+          zones: [
+            { zoneId: KITCHEN, volume: 20, isCoordinator: true },
+            { zoneId: BEDROOM, volume: 10, isCoordinator: false },
+            { zoneId: LIVING, volume: 10, isCoordinator: false },
+          ],
+          shrink: { afterMinutes: 30, keepZoneIds: [KITCHEN] },
+        },
+        zoneNames(),
+      )
+      driver.failJoinFor(LIVING)
+      await engine.activate(preset)
+      await new Promise((resolve) => setImmediate(resolve))
+
+      now = new Date(now.getTime() + 31 * 60 * 1000)
+      await makeScheduler().tick()
+
+      expect(
+        driver.snapshot().groups.find((g) => g.coordinatorZoneId === KITCHEN)?.memberZoneIds,
+      ).toEqual([KITCHEN])
+    })
+
     it('fires once the preset has been playing long enough, and only once', async () => {
       const preset = presets.create(
         {
