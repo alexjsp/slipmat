@@ -30,17 +30,17 @@ import { classifyPlaybackKind, followUriFor, queueUriFor } from './uris.js'
 const QUEUE_PAGE_SIZE = 1000
 
 /**
- * Pause between commands that change the household's topology.
+ * No gap between topology commands, matching `node-sonos-http-api`.
  *
- * Sonos does not cope with being asked to do several of these at once. Three
- * concurrent joins produced two thirty-second HTTP timeouts — not slow replies,
- * no reply at all — and left those speakers out of the group and muted. Issuing
- * them one at a time with a gap is both more reliable and, because a hung call
- * costs thirty seconds, faster in practice.
+ * Its `groupWithCoordinator` chains the joins with `.then()` and calls
+ * `SetAVTransportURI` bare — sequential, nothing between them. The reliability
+ * comes from doing one at a time and from skipping any speaker already
+ * following the coordinator, not from spacing.
+ *
+ * Queue commands are a different matter and do get a gap: those make Sonos
+ * expand a container, which is real work for the household rather than a
+ * bookkeeping change.
  */
-const TOPOLOGY_COMMAND_GAP_MS = 250
-
-const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** UPnP subscriptions last ~10 minutes; renew comfortably inside that. */
 const SUBSCRIPTION_CHECK_MS = 4 * 60 * 1000
@@ -551,11 +551,11 @@ export class RealSonosDriver implements SonosDriver {
     // stops playback. Callers that started the music first pass false.
     if (options.makeStandalone !== false) await this.leaveGroup([coordinatorZoneId], options)
 
-    // One at a time, with a gap. Doing these concurrently looks obviously
-    // better — each takes ~2.6s because Sonos does not answer until the speaker
-    // has actually joined — and it is how this got into trouble: three at once
-    // and two speakers stopped responding entirely until the HTTP client gave
-    // up thirty seconds later.
+    // One at a time. Doing these concurrently looks obviously better — each
+    // takes ~2.6s because Sonos does not answer until the speaker has actually
+    // joined — and it is how this got into trouble: three at once and two
+    // speakers stopped responding entirely until the HTTP client gave up thirty
+    // seconds later.
     const followers = zoneIds.filter((zoneId) => zoneId !== coordinatorZoneId)
     const joins = (async () => {
       for (const zoneId of followers) {
@@ -568,7 +568,6 @@ export class RealSonosDriver implements SonosDriver {
         } catch (err) {
           this.logger.warn({ err, zoneId }, 'speaker failed to join the group')
         }
-        await pause(TOPOLOGY_COMMAND_GAP_MS)
       }
     })()
 
