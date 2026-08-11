@@ -130,6 +130,15 @@ export const presetStatusSchema = z.object({
   loading: z.boolean(),
   tracksEnqueued: z.number().int().min(0),
   tracksTotal: z.number().int().min(0).nullable(),
+  /**
+   * When this preset will drop back to fewer rooms, as an absolute time.
+   *
+   * A timestamp rather than a number of seconds so the UI can count down
+   * smoothly between polls instead of jumping whenever a fresh figure lands.
+   * Null when the preset has no wind-down, is not playing, or has already
+   * wound down.
+   */
+  windDownAt: z.string().datetime().nullable(),
   warnings: z.array(z.string()),
 })
 export type PresetStatus = z.infer<typeof presetStatusSchema>

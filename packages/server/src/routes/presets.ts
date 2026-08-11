@@ -56,6 +56,14 @@ export async function registerPresetRoutes(
       loading: false,
       tracksEnqueued: uris.length,
       tracksTotal: null,
+      // Only while it is still going to happen: no wind-down configured, not
+      // playing, or already wound down all mean there is nothing to count to.
+      windDownAt:
+        activation && !activation.shrunkAt && preset.shrink
+          ? new Date(
+              new Date(activation.startedAt).getTime() + preset.shrink.afterMinutes * 60_000,
+            ).toISOString()
+          : null,
       warnings: activation ? (JSON.parse(activation.warningsJson) as string[]) : [],
     }
   }

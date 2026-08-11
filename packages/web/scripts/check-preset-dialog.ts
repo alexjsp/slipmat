@@ -22,7 +22,10 @@ const page = await browser.newPage()
 await page.setViewportSize({ width: 430, height: 860 })
 await page.goto(baseUrl, { waitUntil: 'networkidle' })
 await page.getByRole('link', { name: 'Presets' }).click()
-await page.getByRole('button', { name: /New preset/ }).click()
+// The header button, which is there whether or not any presets exist — the
+// "New preset" wording only appears in the empty state, so matching that made
+// this pass on a fresh instance and hang on a real one.
+await page.getByRole('button', { name: 'New', exact: true }).click()
 await page.waitForTimeout(400)
 
 // The page behind has a "New preset" button too, so match the dialog itself.

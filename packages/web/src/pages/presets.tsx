@@ -1,10 +1,11 @@
 import type { Preset, PresetStatus, Zone } from '@slipmat/shared'
-import { AlertTriangle, Loader2, Pencil, Play, Plus, RotateCcw, Square } from 'lucide-react'
+import { AlertTriangle, Loader2, Moon, Pencil, Play, Plus, RotateCcw, Square } from 'lucide-react'
 import { useState } from 'react'
 import { PresetEditor } from '@/components/preset-editor'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { usePresetMutations, usePresets } from '@/lib/presets'
+import { formatCountdown, useCountdown } from '@/lib/use-countdown'
 import { cn } from '@/lib/utils'
 
 export function PresetsPage({ zones, onError }: { zones: Zone[]; onError: (m: string) => void }) {
@@ -76,6 +77,9 @@ function PresetTile({
 }) {
   const mutations = usePresetMutations()
   const active = status?.active ?? false
+  // Counted locally from the moment the server gave us, so it ticks every
+  // second rather than only when the preset list is refetched.
+  const windDown = useCountdown(status?.windDownAt ?? null)
   const busy =
     mutations.activate.isPending || mutations.stop.isPending || mutations.restart.isPending
 
@@ -150,6 +154,16 @@ function PresetTile({
           )}
         </div>
       </div>
+
+      {windDown !== null && (
+        <div className="flex items-center gap-2 border-t px-4 py-2 text-muted-foreground text-xs">
+          <Moon className="size-3.5 shrink-0" />
+          <span>
+            Winding down to fewer speakers in{' '}
+            <span className="tabular-nums">{formatCountdown(windDown)}</span>
+          </span>
+        </div>
+      )}
 
       {status && status.warnings.length > 0 && (
         <div className="flex items-start gap-2 border-t bg-amber-500/10 px-4 py-2 text-amber-600 text-xs dark:text-amber-400">
