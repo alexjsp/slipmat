@@ -93,6 +93,8 @@ describe('ActivationEngine', () => {
       logger,
       repo,
       timeZone: 'UTC',
+      // Real life spaces these out; the tests would only be waiting.
+      queueGapMs: 0,
     })
     zoneNames = new Map(driver.snapshot().zones.map((zone) => [zone.id, zone.name]))
   })
@@ -110,29 +112,25 @@ describe('ActivationEngine', () => {
     expect(group?.transportState).toBe('PLAYING')
   })
 
-  it("sets a follower's volume only after it has joined", async () => {
+  it('sets every volume after grouping and before playing', async () => {
     const preset = create()
     await engine.activate(preset)
-    // Followers join behind playback now, and take their volume once they have.
     await settle()
 
     const zones = driver.snapshot().zones
     expect(zones.find((z) => z.id === KITCHEN)?.volume).toBe(30)
     expect(zones.find((z) => z.id === BEDROOM)?.volume).toBe(15)
 
-    // Joining resets a follower's volume, so setting it earlier is silently
-    // undone. The coordinator keeps its own through a join, and is set up front
-    // so the room you hear first is at the right volume immediately.
-    const joinIndex = driver.calls.findIndex((call) => call.method === 'joinGroup')
-    const followerVolumeIndex = driver.calls.findIndex(
-      (call) => call.method === 'setVolume' && call.args[0] === BEDROOM,
-    )
-    const coordinatorVolumeIndex = driver.calls.findIndex(
-      (call) => call.method === 'setVolume' && call.args[0] === KITCHEN,
-    )
-    expect(joinIndex).toBeGreaterThanOrEqual(0)
-    expect(followerVolumeIndex).toBeGreaterThan(joinIndex)
-    expect(coordinatorVolumeIndex).toBeLessThan(joinIndex)
+    // Joining resets a member's volume, so volumes have to follow the grouping.
+    // Play following the volumes is what keeps anything from being briefly
+    // audible at the wrong one — the job the mute dance used to attempt.
+    const methods = driver.calls.map((call) => call.method)
+    const lastJoin = methods.lastIndexOf('joinGroup')
+    const firstVolume = methods.indexOf('setVolume')
+    const play = methods.indexOf('play')
+    expect(lastJoin).toBeGreaterThanOrEqual(0)
+    expect(firstVolume).toBeGreaterThan(lastJoin)
+    expect(play).toBeGreaterThan(firstVolume)
   })
 
   it('does not tear down a group that is already the one it wants', async () => {
@@ -168,9 +166,11 @@ describe('ActivationEngine', () => {
     expect(group?.memberZoneIds.sort()).toEqual([BEDROOM, KITCHEN])
   })
 
-  it('leaves a speaker that never joined muted, and says so', async () => {
-    // The bug this replaces: the mute was lifted unconditionally, so a speaker
-    // that failed to join went back to being audible playing its own music.
+  it('never mutes a speaker, so none can be left silent by a failed join', async () => {
+    // There is no muting to undo any more. Play comes after the volumes, so a
+    // speaker that never joins simply is not in the group and never makes a
+    // sound — replacing a mute-then-unmute dance that stranded rooms muted for
+    // the evening whenever the unmute did not happen.
     driver.setBrowseResult('SQ:1', [track('jazz-1')])
     const preset = create()
     driver.failJoinFor(BEDROOM)
@@ -178,9 +178,11 @@ describe('ActivationEngine', () => {
     await engine.activate(preset)
     await settle()
 
-    expect(driver.snapshot().zones.find((z) => z.id === BEDROOM)?.muted).toBe(true)
-    const activation = engine.liveActivation(preset.id)
-    expect(JSON.parse(activation?.warningsJson ?? '[]').join(' ')).toMatch(/did not join/)
+    expect(driver.calls.some((call) => call.method === 'setMute' && call.args[1] === true)).toBe(
+      false,
+    )
+    expect(driver.snapshot().zones.find((z) => z.id === BEDROOM)?.muted).toBe(false)
+    expect(engine.liveActivation(preset.id)).toBeDefined()
   })
 
   it('queues every source and leaves the interleaving to Sonos shuffle', async () => {
@@ -467,6 +469,7 @@ describe('ActivationEngine', () => {
         repo: repo2,
         timeZone: 'UTC',
         now: () => now,
+        queueGapMs: 0,
       })
       return { repo: repo2, engine: engine2 }
     }
@@ -485,6 +488,7 @@ describe('ActivationEngine', () => {
       ])
 
       await e.activate(preset)
+      await settle()
       const queue = driver.queueOf(KITCHEN)
       expect(queue.some((uri) => uri.startsWith('rock'))).toBe(true)
       expect(queue.some((uri) => uri.startsWith('jazz'))).toBe(true)
@@ -593,7 +597,17 @@ describe('ActivationEngine', () => {
         { kind: 'sonos_playlist' as const, ref: 'SQ:2', label: 'Mix' },
       ]
       const engineWith = (random: () => number) =>
-        new ActivationEngine({ db, driver, store, cache, logger, repo, timeZone: 'UTC', random })
+        new ActivationEngine({
+          db,
+          driver,
+          store,
+          cache,
+          logger,
+          repo,
+          timeZone: 'UTC',
+          random,
+          queueGapMs: 0,
+        })
 
       // Both are small, so both are candidates and the choice is the random one.
       await engineWith(() => 0).activate(create({ name: 'First', sources }))

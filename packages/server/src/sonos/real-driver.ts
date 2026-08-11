@@ -29,6 +29,19 @@ import { classifyPlaybackKind, followUriFor, queueUriFor } from './uris.js'
 /** Sonos returns at most this many Browse results regardless of what we ask. */
 const QUEUE_PAGE_SIZE = 1000
 
+/**
+ * Pause between commands that change the household's topology.
+ *
+ * Sonos does not cope with being asked to do several of these at once. Three
+ * concurrent joins produced two thirty-second HTTP timeouts — not slow replies,
+ * no reply at all — and left those speakers out of the group and muted. Issuing
+ * them one at a time with a gap is both more reliable and, because a hung call
+ * costs thirty seconds, faster in practice.
+ */
+const TOPOLOGY_COMMAND_GAP_MS = 250
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
 /** UPnP subscriptions last ~10 minutes; renew comfortably inside that. */
 const SUBSCRIPTION_CHECK_MS = 4 * 60 * 1000
 /** Topology is event-driven, but a slow backstop catches missed notifications. */
@@ -209,12 +222,21 @@ export class RealSonosDriver implements SonosDriver {
   private async prime(device: SonosDevice) {
     const uuid = device.Uuid
     try {
-      const [volume, mute, transport, media] = await Promise.all([
-        device.RenderingControlService.GetVolume({ InstanceID: 0, Channel: 'Master' }),
-        device.RenderingControlService.GetMute({ InstanceID: 0, Channel: 'Master' }),
-        device.AVTransportService.GetTransportInfo({ InstanceID: 0 }),
-        device.AVTransportService.GetMediaInfo({ InstanceID: 0 }),
-      ])
+      // Sequential, and not because it is faster — it is not. Every device in
+      // the household primes at once, so four concurrent reads each becomes
+      // dozens of simultaneous requests at startup, and this system does not
+      // reward asking it several things at the same time. Nothing is waiting on
+      // this, so it can afford to be polite.
+      const volume = await device.RenderingControlService.GetVolume({
+        InstanceID: 0,
+        Channel: 'Master',
+      })
+      const mute = await device.RenderingControlService.GetMute({
+        InstanceID: 0,
+        Channel: 'Master',
+      })
+      const transport = await device.AVTransportService.GetTransportInfo({ InstanceID: 0 })
+      const media = await device.AVTransportService.GetMediaInfo({ InstanceID: 0 })
 
       const state = transport.CurrentTransportState
       this.patch(uuid, {
@@ -529,25 +551,26 @@ export class RealSonosDriver implements SonosDriver {
     // stops playback. Callers that started the music first pass false.
     if (options.makeStandalone !== false) await this.leaveGroup([coordinatorZoneId], options)
 
-    // In parallel, and measured: telling one speaker to follow another takes
-    // ~2.6s, because Sonos does not answer until the speaker has actually torn
-    // down what it was doing and joined. Sequentially that is eight seconds for
-    // a four-room preset, all of it before a note plays.
-    const joins = Promise.all(
-      zoneIds
-        .filter((zoneId) => zoneId !== coordinatorZoneId)
-        .map((zoneId) =>
-          this.requireDevice(zoneId)
-            .AVTransportService.SetAVTransportURI({
-              InstanceID: 0,
-              CurrentURI: followUriFor(coordinatorZoneId),
-              CurrentURIMetaData: '',
-            })
-            .catch((err) => {
-              this.logger.warn({ err, zoneId }, 'speaker failed to join the group')
-            }),
-        ),
-    )
+    // One at a time, with a gap. Doing these concurrently looks obviously
+    // better — each takes ~2.6s because Sonos does not answer until the speaker
+    // has actually joined — and it is how this got into trouble: three at once
+    // and two speakers stopped responding entirely until the HTTP client gave
+    // up thirty seconds later.
+    const followers = zoneIds.filter((zoneId) => zoneId !== coordinatorZoneId)
+    const joins = (async () => {
+      for (const zoneId of followers) {
+        try {
+          await this.requireDevice(zoneId).AVTransportService.SetAVTransportURI({
+            InstanceID: 0,
+            CurrentURI: followUriFor(coordinatorZoneId),
+            CurrentURIMetaData: '',
+          })
+        } catch (err) {
+          this.logger.warn({ err, zoneId }, 'speaker failed to join the group')
+        }
+        await pause(TOPOLOGY_COMMAND_GAP_MS)
+      }
+    })()
 
     // Left in flight deliberately: the caller starts the music and uses
     // `awaitGrouping` as the synchronisation point once it has.

@@ -39,6 +39,16 @@ const CONTAINER_ENQUEUE_TIMEOUT_MS = 5 * 60 * 1000
  */
 const FAST_START_MAX_TRACKS = 100
 
+/**
+ * Breathing room between queue commands.
+ *
+ * Each of these makes Sonos expand a container, which is real work for the
+ * household. Running them back to back, on top of grouping, is what turned a
+ * four-second activation into a thirty-four-second one with speakers dropping
+ * out. Nobody is waiting on these — the music is already playing.
+ */
+const QUEUE_COMMAND_GAP_MS = 500
+
 export type ActivationDeps = {
   db: Db
   driver: SonosDriver
@@ -52,6 +62,8 @@ export type ActivationDeps = {
   now?: () => Date
   /** Injectable so the random choice of opening source can be pinned in tests. */
   random?: () => number
+  /** Gap between background queue commands. Zero in tests; real time in life. */
+  queueGapMs?: number
 }
 
 export class ActivationEngine {
@@ -165,57 +177,15 @@ export class ActivationEngine {
       took('pauseOthers')
     }
 
-    // Grouping is by far the slowest thing here — Sonos takes a couple of
-    // seconds to report the new topology, measured at 2.6s of a 4.3s activation
-    // — and none of it has to happen before the coordinator can play. Members
-    // join a group that is already playing perfectly well.
-    //
-    // They are muted first, though. A join resets a member's volume, so its
-    // real volume can only be set once the topology has settled, and a room
-    // that was loud last night must not get a couple of seconds at that volume
-    // on the way past.
+    // Group first, one command at a time, skipping anything already true. This
+    // is the order `node-sonos-http-api` uses, and the reason for following it
+    // is that concurrency here made the household unreliable: three joins at
+    // once produced two thirty-second HTTP timeouts and left those rooms out of
+    // the group entirely.
     const memberZoneIds = members.map((zone) => zone.zoneId)
-    const followers = memberZoneIds.filter((zoneId) => zoneId !== coordinator.zoneId)
-    await Promise.all(
-      followers.map((zoneId) =>
-        this.deps.driver.setMute(zoneId, true).catch(() => {
-          // Better to risk a moment of the old volume than to abandon the preset.
-        }),
-      ),
-    )
-    took('muteFollowers')
-
-    // Only the coordinator is set up before playback. Joining the followers is
-    // left until after, because Sonos serialises topology changes across the
-    // household: joins in flight put the coordinator's own commands behind
-    // them, and `setCrossfade` measured 22s waiting its turn.
-    // Breaking the coordinator out of its group costs ~3.2s and is usually
-    // pointless. Re-running a preset is the common case — the HomeKit switch,
-    // a schedule, a webhook retry — and the coordinator is already coordinating
-    // exactly those rooms. Tearing that down to rebuild it identically is the
-    // single most expensive thing an activation used to do.
-    //
-    // It is still done when the coordinator is following someone else, or when
-    // its group holds a room this preset does not want, since those need
-    // undoing. This one is waited for: skipping the wait saves 1.8s and makes
-    // the transport calls race the group change, which left about one
-    // activation in three STOPPED with a track loaded. Measured, not theorised.
-    const currentGroup = snapshot.groups.find(
-      (group) => group.coordinatorZoneId === coordinator.zoneId,
-    )
-    const wanted = new Set(memberZoneIds)
-    const alreadyRight =
-      !!currentGroup && currentGroup.memberZoneIds.every((zoneId) => wanted.has(zoneId))
-    if (!alreadyRight) {
-      await this.applyGrouping(coordinator.zoneId, [coordinator.zoneId], warnings)
-    }
+    await this.applyGrouping(coordinator.zoneId, memberZoneIds, warnings)
     took('group')
 
-    // The coordinator keeps its own volume through a join, so this one sticks.
-    const coordinatorVolume = volumeByZone.get(coordinator.zoneId) ?? coordinator.volume
-    await this.deps.driver.setVolume(coordinator.zoneId, coordinatorVolume).catch(() => undefined)
-    await this.deps.driver.setMute(coordinator.zoneId, false).catch(() => undefined)
-    took('volumes')
     await this.deps.driver.setCrossfade(coordinator.zoneId, flags.crossfade).catch(() => {
       warnings.push('Crossfade could not be set')
     })
@@ -287,6 +257,16 @@ export class ActivationEngine {
     // Only when the queue loops, though. Starting two thirds of the way into a
     // queue that stops at the end means the first two thirds never play at all
     // — a worse trade than a predictable opening track.
+    // Volumes last, and only then Play. Joining resets a member's volume, so
+    // this has to follow the grouping; putting Play after it means nothing is
+    // ever audible at the wrong volume, which is what the muting and unmuting
+    // this replaces was trying and failing to achieve.
+    await this.applyVolumes(
+      members.map((zone) => ({ ...zone, volume: volumeByZone.get(zone.zoneId) ?? zone.volume })),
+      warnings,
+    )
+    took('volumes')
+
     if (flags.shuffle && flags.repeatAll) await this.startSomewhereRandom(coordinator.zoneId)
     took('startPoint')
     await this.deps.driver.play(coordinator.zoneId)
@@ -310,15 +290,6 @@ export class ActivationEngine {
       streamUri: null,
       warnings,
     })
-
-    // The other rooms join music that is already playing.
-    void this.joinFollowers(
-      activationId,
-      coordinator.zoneId,
-      members
-        .filter((zone) => zone.zoneId !== coordinator.zoneId)
-        .map((zone) => ({ ...zone, volume: volumeByZone.get(zone.zoneId) ?? zone.volume })),
-    ).catch((err) => this.logger.warn({ err, presetId: preset.id }, 'failed to join followers'))
 
     // The rest fills in behind playback.
     void this.fillQueue(activationId, coordinator.zoneId, tail, {
@@ -574,18 +545,45 @@ export class ActivationEngine {
     this.deps.store.refresh()
   }
 
-  private async applyGrouping(
-    coordinatorZoneId: string,
-    zoneIds: string[],
-    warnings: string[],
-    options: { settle?: boolean } = {},
-  ) {
-    const others = zoneIds.filter((zoneId) => zoneId !== coordinatorZoneId)
+  /**
+   * Put exactly the preset's speakers in one group, doing as little as possible.
+   *
+   * Modelled on `node-sonos-http-api`'s `applyPreset`, which has been reliable
+   * for years where this had become flaky. The lessons taken from it:
+   *
+   * - one command at a time, never several at once;
+   * - never redo work that is already done — a speaker already following this
+   *   coordinator is left alone, which makes re-running a preset nearly free;
+   * - only break the coordinator out when it is somebody's follower. If it is
+   *   already coordinating, remove the rooms that should not be there instead
+   *   of tearing the group down and rebuilding it.
+   */
+  private async applyGrouping(coordinatorZoneId: string, zoneIds: string[], warnings: string[]) {
+    const wanted = new Set(zoneIds)
     try {
-      if (others.length > 0) {
-        await this.deps.driver.joinGroup(coordinatorZoneId, others, options)
-      } else {
+      const group = this.deps.driver
+        .snapshot()
+        .groups.find((candidate) => candidate.coordinatorZoneId === coordinatorZoneId)
+
+      // No group of its own means it is following someone else, and has to be
+      // broken out before anyone can follow it.
+      if (!group) {
         await this.deps.driver.leaveGroup([coordinatorZoneId])
+      }
+
+      const present = new Set(group?.memberZoneIds ?? [coordinatorZoneId])
+      const missing = zoneIds.filter(
+        (zoneId) => zoneId !== coordinatorZoneId && !present.has(zoneId),
+      )
+      if (missing.length > 0) {
+        await this.deps.driver.joinGroup(coordinatorZoneId, missing, { makeStandalone: false })
+      }
+
+      const superfluous = [...present].filter(
+        (zoneId) => zoneId !== coordinatorZoneId && !wanted.has(zoneId),
+      )
+      if (superfluous.length > 0) {
+        await this.deps.driver.leaveGroup(superfluous)
       }
     } catch (err) {
       this.logger.warn({ err, coordinatorZoneId }, 'grouping failed')
@@ -702,12 +700,21 @@ export class ActivationEngine {
     sources: EnqueueableSource[],
     options: { dedupe: boolean; shuffle: boolean; repeatAll: boolean },
   ): Promise<void> {
+    // Let the grouping finish before adding anything else. The remaining
+    // sources are large container enqueues, and stacking them on top of a
+    // household still moving speakers between groups is what made this
+    // unreliable in the first place.
+    await this.deps.driver.awaitGrouping(zoneId, []).catch(() => undefined)
+
     for (const source of sources) {
       if (!this.isLive(activationId)) {
         this.logger.info({ activationId }, 'queue fill abandoned; activation is no longer live')
         return
       }
       await this.enqueueSource(zoneId, source)
+      // A gap between queue commands, for the same reason as everywhere else.
+      const gap = this.deps.queueGapMs ?? QUEUE_COMMAND_GAP_MS
+      if (gap > 0) await new Promise((resolve) => setTimeout(resolve, gap))
     }
     if (!this.isLive(activationId)) return
 

@@ -173,13 +173,19 @@ export async function registerPresetRoutes(
 
     // Rules can introduce sources the cache has never seen; warm them now so
     // the first matching activation isn't the one that pays for a cold resolve.
-    void Promise.allSettled(
-      rules.flatMap((rule) =>
-        [...(rule.effect.addSources ?? []), ...(rule.effect.replaceSources ?? [])].map((source) =>
-          cache.get(source),
-        ),
-      ),
-    )
+    // Sequentially, for the same reason as everywhere else: resolving an
+    // expensive source borrows a speaker, and this system does not like being
+    // asked for several things at once.
+    void (async () => {
+      for (const rule of rules) {
+        for (const source of [
+          ...(rule.effect.addSources ?? []),
+          ...(rule.effect.replaceSources ?? []),
+        ]) {
+          await cache.get(source).catch(() => undefined)
+        }
+      }
+    })()
 
     return {
       rules,
@@ -190,10 +196,16 @@ export async function registerPresetRoutes(
   app.get('/api/presets/export', async () => ({ presets: repo.list() }))
 }
 
-function warmSources(cache: SourceCache, preset: Preset) {
-  return Promise.allSettled(
-    preset.sources.map((source) =>
-      cache.get({ kind: source.kind, ref: source.ref, label: source.label }),
-    ),
-  )
+async function warmSources(cache: SourceCache, preset: Preset) {
+  // One source at a time. Resolving an expensive one borrows a speaker's queue,
+  // and several at once means several speakers borrowed simultaneously — on a
+  // system that reacts badly to being asked for more than one thing at a time.
+  // Nobody is waiting on this; it runs after the save has been answered.
+  for (const source of preset.sources) {
+    try {
+      await cache.get({ kind: source.kind, ref: source.ref, label: source.label })
+    } catch {
+      // A source that will not resolve is surfaced when the preset is used.
+    }
+  }
 }
