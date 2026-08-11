@@ -711,17 +711,28 @@ export class ActivationEngine {
     // unreliable in the first place.
     await this.deps.driver.awaitGrouping(zoneId, []).catch(() => undefined)
 
+    const gap = this.deps.queueGapMs ?? QUEUE_COMMAND_GAP_MS
+    const breathe = () =>
+      gap > 0 ? new Promise((resolve) => setTimeout(resolve, gap)) : Promise.resolve()
+
+    // The caller has just enqueued the first source, and that counts. A preset
+    // with a single source — which most are — would otherwise go straight from
+    // that container expansion into removing duplicates and setting the play
+    // mode, with no pause anywhere, because the loop below has nothing to do.
+    await breathe()
+
     for (const source of sources) {
       if (!this.isLive(activationId)) {
         this.logger.info({ activationId }, 'queue fill abandoned; activation is no longer live')
         return
       }
       await this.enqueueSource(zoneId, source)
-      // Between commands, not after the last one — at five seconds a trailing
-      // pause is five seconds of holding up the dedupe and the shuffle.
-      const gap = this.deps.queueGapMs ?? QUEUE_COMMAND_GAP_MS
-      const isLast = source === sources[sources.length - 1]
-      if (gap > 0 && !isLast) await new Promise((resolve) => setTimeout(resolve, gap))
+      // After every one of them, the last included. Skipping the final pause
+      // looked like a free five seconds and is the opposite: enqueueing a
+      // container is the command that leaves a speaker labouring, and what
+      // comes next — removing duplicates, re-asserting the play mode — lands
+      // straight on it.
+      await breathe()
     }
     if (!this.isLive(activationId)) return
 
