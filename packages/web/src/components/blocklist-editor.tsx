@@ -33,6 +33,16 @@ let keyCounter = 0
 const nextKey = () => `block-${keyCounter++}`
 
 /**
+ * A comparable form of the list, for telling saved from unsaved.
+ *
+ * Fields are listed explicitly rather than stringifying the objects, which
+ * would compare key order too — invisible, and different depending on whether a
+ * rule came back from the server or was just typed.
+ */
+const canonical = (rules: BlockRule[]) =>
+  JSON.stringify(rules.map((rule) => [rule.field, rule.match, rule.pattern, rule.enabled]))
+
+/**
  * Music never to play, whichever preset asks for it.
  *
  * Applied when the queue is pruned, in the same pass that removes duplicates —
@@ -59,6 +69,10 @@ export function BlocklistEditor() {
   })
 
   if (!draft) return <p className="text-muted-foreground text-sm">Loading…</p>
+
+  const current = draft.map(({ key, ...rule }) => rule)
+  const unsaved = canonical(current) !== canonical(query.data?.rules ?? [])
+  const incomplete = draft.some((rule) => rule.pattern.trim() === '')
 
   const patch = (index: number, changes: Partial<DraftRule>) =>
     setDraft(draft.map((rule, i) => (i === index ? { ...rule, ...changes } : rule)))
@@ -152,7 +166,9 @@ export function BlocklistEditor() {
       <Button
         size="sm"
         className="self-start"
-        disabled={save.isPending || draft.some((rule) => rule.pattern.trim() === '')}
+        // Lit only when there is something to save, so the button itself says
+        // whether the list on screen is the list in force.
+        disabled={save.isPending || !unsaved || incomplete}
         onClick={() => save.mutate(draft)}
       >
         {save.isPending ? 'Saving…' : 'Save blocked music'}
