@@ -58,8 +58,16 @@ function presetInput(overrides: Partial<PresetInput> = {}): PresetInput {
  * in behind it. Anything asserting on the *whole* queue has to wait for that.
  */
 const settle = async () => {
-  for (let index = 0; index < 50; index += 1) {
-    await new Promise((resolve) => setImmediate(resolve))
+  // `setTimeout`, not `setImmediate`. The background work waits on timers — the
+  // gap between queue commands, the pause after a skip — and a tight
+  // `setImmediate` loop runs in an earlier phase of the event loop, starving
+  // them. That looked exactly like a broken feature: the work stopped partway
+  // and the assertions ran against a half-finished queue.
+  // Forty is comfortably more than the longest chain any test sets up — eight
+  // skips past blocked tracks is the worst of them — without making every call
+  // wait a tenth of a second for nothing.
+  for (let index = 0; index < 40; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
   }
 }
 
@@ -96,6 +104,7 @@ describe('ActivationEngine', () => {
       timeZone: 'UTC',
       // Real life spaces these out; the tests would only be waiting.
       queueGapMs: 0,
+      skipSettleMs: 0,
     })
     zoneNames = new Map(driver.snapshot().zones.map((zone) => [zone.id, zone.name]))
   })
@@ -264,6 +273,7 @@ describe('ActivationEngine', () => {
       repo,
       timeZone: 'UTC',
       queueGapMs: 0,
+      skipSettleMs: 0,
       settings: {
         blocklist: () => [
           { field: 'any', match: 'contains', pattern: 'christmas', enabled: true },
@@ -276,6 +286,73 @@ describe('ActivationEngine', () => {
     await settle()
 
     expect(driver.queueOf(KITCHEN)).toEqual(['b'])
+  })
+
+  it('skips off a blocked track that is already playing', async () => {
+    // The prune runs a few seconds after playback starts, and the track it
+    // opened on is picked at random — so it may well be one you never want to
+    // hear. Taking it out of the queue is no help; it is already playing.
+    driver.setBrowseResult('SQ:1', [
+      { ...track('a'), title: 'Last Christmas', artist: 'Wham!' },
+      { ...track('b'), title: 'Wichita Lineman', artist: 'Glen Campbell' },
+    ])
+    const blocked = new ActivationEngine({
+      db,
+      driver,
+      store,
+      cache,
+      logger,
+      repo,
+      timeZone: 'UTC',
+      queueGapMs: 0,
+      skipSettleMs: 0,
+      // Always start on the first track, which is the blocked one.
+      random: () => 0,
+      settings: {
+        blocklist: () => [{ field: 'any', match: 'contains', pattern: 'christmas', enabled: true }],
+      },
+    })
+
+    await blocked.activate(create())
+    await settle()
+
+    expect(driver.calls.some((call) => call.method === 'next')).toBe(true)
+    const group = driver.snapshot().groups.find((g) => g.coordinatorZoneId === KITCHEN)
+    expect(group?.currentTrack?.title).toBe('Wichita Lineman')
+    expect(driver.queueOf(KITCHEN)).toEqual(['b'])
+  })
+
+  it('gives up skipping rather than hammering a queue of nothing but blocked music', async () => {
+    driver.setBrowseResult(
+      'SQ:1',
+      Array.from({ length: 30 }, (_, index) => ({
+        ...track(`x-${index}`),
+        title: `Last Christmas ${index}`,
+        artist: 'Wham!',
+      })),
+    )
+    const blocked = new ActivationEngine({
+      db,
+      driver,
+      store,
+      cache,
+      logger,
+      repo,
+      timeZone: 'UTC',
+      queueGapMs: 0,
+      skipSettleMs: 0,
+      random: () => 0,
+      settings: {
+        blocklist: () => [{ field: 'any', match: 'contains', pattern: 'christmas', enabled: true }],
+      },
+    })
+
+    await blocked.activate(create())
+    await settle()
+
+    // Bounded, and the prune clears the queue regardless.
+    expect(driver.calls.filter((call) => call.method === 'next').length).toBeLessThanOrEqual(8)
+    expect(driver.queueOf(KITCHEN)).toEqual([])
   })
 
   it('applies the blocklist even when deduplication is off', async () => {
@@ -292,6 +369,7 @@ describe('ActivationEngine', () => {
       repo,
       timeZone: 'UTC',
       queueGapMs: 0,
+      skipSettleMs: 0,
       settings: {
         blocklist: () => [{ field: 'any', match: 'contains', pattern: 'christmas', enabled: true }],
       },
@@ -562,6 +640,7 @@ describe('ActivationEngine', () => {
         timeZone: 'UTC',
         now: () => now,
         queueGapMs: 0,
+        skipSettleMs: 0,
       })
       return { repo: repo2, engine: engine2 }
     }
@@ -699,6 +778,7 @@ describe('ActivationEngine', () => {
           timeZone: 'UTC',
           random,
           queueGapMs: 0,
+          skipSettleMs: 0,
         })
 
       // Both are small, so both are candidates and the choice is the random one.

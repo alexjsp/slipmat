@@ -58,6 +58,24 @@ const DEFAULT_ZONES = [
   { id: 'RINCON_OFFICE01400', name: 'Office' },
 ]
 
+/**
+ * What a real speaker reports as the current track once it starts playing one.
+ *
+ * The fake used to move `currentTrackUri` and leave `currentTrack` alone, so
+ * anything reading the playing track's title or artist saw nothing — which
+ * would have hidden the blocklist's skip entirely.
+ */
+function trackFromQueueItem(item: DriverBrowseItem): DriverTrack {
+  return {
+    uri: item.uri ?? '',
+    title: item.title,
+    artist: item.artist ?? item.subtitle ?? null,
+    album: item.album,
+    artUrl: item.artUrl,
+    durationSeconds: null,
+  }
+}
+
 export class FakeSonosDriver implements SonosDriver {
   private readonly emitter = new EventEmitter()
   private readonly zones = new Map<string, FakeZone>()
@@ -196,6 +214,7 @@ export class FakeSonosDriver implements SonosDriver {
     const nextItem = group.queue[index + 1]
     if (nextItem?.uri) {
       group.currentTrackUri = nextItem.uri
+      group.currentTrack = trackFromQueueItem(nextItem)
       group.positionSeconds = 0
     }
     this.changed()
@@ -337,6 +356,7 @@ export class FakeSonosDriver implements SonosDriver {
     const item = group.queue[position - 1]
     if (item?.uri) {
       group.currentTrackUri = item.uri
+      group.currentTrack = trackFromQueueItem(item)
       group.positionSeconds = 0
     }
     this.changed()

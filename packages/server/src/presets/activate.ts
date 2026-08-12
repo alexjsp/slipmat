@@ -55,6 +55,14 @@ const FAST_START_MAX_TRACKS = 100
  */
 const QUEUE_COMMAND_GAP_MS = 5000
 
+/**
+ * How many blocked tracks in a row to skip before giving up.
+ *
+ * A queue of nothing but blocked music would otherwise skip forever, hammering
+ * the speaker. The prune that follows removes them anyway.
+ */
+const MAX_BLOCKED_SKIPS = 8
+
 export type ActivationDeps = {
   db: Db
   driver: SonosDriver
@@ -70,6 +78,8 @@ export type ActivationDeps = {
   random?: () => number
   /** Music never to play. Absent means no blocklist, which is the default. */
   settings?: { blocklist(): BlockRule[] }
+  /** How long to let a skip land. Zero in tests; a real speaker needs a moment. */
+  skipSettleMs?: number
   /** Gap between background queue commands. Zero in tests; real time in life. */
   queueGapMs?: number
 }
@@ -878,6 +888,37 @@ export class ActivationEngine {
   }
 
   /**
+   * Skip forward until what is playing is something you want to hear.
+   *
+   * Bounded, because the alternative is a queue of nothing but blocked music
+   * skipping forever, hammering the speaker. If the limit is reached the prune
+   * still runs, which clears the queue of them so the next track is clean.
+   */
+  private async skipPastBlocked(
+    zoneId: string,
+    blocked: ReturnType<typeof compileBlocklist>,
+  ): Promise<void> {
+    for (let skips = 0; skips < MAX_BLOCKED_SKIPS; skips += 1) {
+      const group = this.deps.driver
+        .snapshot()
+        .groups.find((candidate) => candidate.coordinatorZoneId === zoneId)
+      const playing = group?.currentTrack
+      if (!playing || !isBlocked(playing, blocked)) return
+
+      this.logger.info(
+        { zoneId, title: playing.title, artist: playing.artist },
+        'skipping blocked track',
+      )
+      await this.deps.driver.next(zoneId).catch((err) => {
+        this.logger.warn({ err, zoneId }, 'could not skip a blocked track')
+      })
+      // The speaker reports the new track over an event, which takes a moment.
+      await new Promise((resolve) => setTimeout(resolve, this.deps.skipSettleMs ?? 700))
+    }
+    this.logger.warn({ zoneId }, 'gave up skipping blocked tracks; the prune will clear them')
+  }
+
+  /**
    * Drop tracks the queue already contains.
    *
    * Sources overlap — a favourites mix and a "great music" playlist share
@@ -888,6 +929,12 @@ export class ActivationEngine {
   private async dedupeQueue(zoneId: string, options: { dedupe: boolean }): Promise<void> {
     const blocked = compileBlocklist(this.deps.settings?.blocklist() ?? [], this.logger)
     if (!options.dedupe && blocked.length === 0) return
+
+    // Move off a blocked track before pruning. The prune runs a few seconds
+    // after playback starts, so the track it opened on — picked at random from
+    // the queue — may well be one you never want to hear. Removing it from the
+    // queue is not enough; it is already playing.
+    if (blocked.length > 0) await this.skipPastBlocked(zoneId, blocked)
 
     const queue = await this.deps.driver.getQueue(zoneId)
     const group = this.deps.driver
