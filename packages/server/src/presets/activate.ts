@@ -10,6 +10,7 @@ import type { SourceCache } from '../sources/cache.js'
 import type { ResolvedTrack, ResolveOptions } from '../sources/resolver.js'
 import type { SystemStateStore } from '../state/store.js'
 import { compileBlocklist, isBlocked } from './blocklist.js'
+import { songKey } from './duplicates.js'
 import type { PresetRepository } from './repository.js'
 import { pickCoordinator } from './repository.js'
 import { clockFrom, evaluateRules } from './rules.js'
@@ -944,7 +945,13 @@ export class ActivationEngine {
     // it out from under the transport skips the track someone is listening to.
     const playing = trackIdentity(group?.currentTrackUri)
 
-    const seen = new Set<string>()
+    const playingSong = songKey(group?.currentTrack ?? {})
+    // Two ways of being the same track, and either is enough. The URI identity
+    // catches the literal same item; the song key catches the same recording
+    // reached through a different playlist, which Apple Music hands back under
+    // a different library id and which the URI can therefore never match.
+    const seenUris = new Set<string>()
+    const seenSongs = new Set<string>()
     const remove: number[] = []
     let blockedCount = 0
     queue.forEach((item, index) => {
@@ -956,13 +963,18 @@ export class ActivationEngine {
         return
       }
       const identity = trackIdentity(item.uri)
-      if (!identity) return
-      if (!seen.has(identity)) {
-        seen.add(identity)
+      const song = songKey(item)
+      const duplicate =
+        (identity !== null && seenUris.has(identity)) || (song !== null && seenSongs.has(song))
+      if (!duplicate) {
+        if (identity) seenUris.add(identity)
+        if (song) seenSongs.add(song)
         return
       }
       if (!options.dedupe) return
-      if (identity === playing) return
+      // Never the one currently playing, by either measure.
+      if (identity !== null && identity === playing) return
+      if (song !== null && song === playingSong) return
       remove.push(index + 1)
     })
     if (remove.length === 0) return

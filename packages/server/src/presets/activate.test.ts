@@ -258,6 +258,30 @@ describe('ActivationEngine', () => {
     expect(driver.queueOf(KITCHEN)).toEqual(queueAfterFirst)
   })
 
+  it('removes the same song reached through a different playlist', async () => {
+    // Apple Music gives the same recording a different library id per playlist,
+    // so the URIs differ and deduplication by URI alone saw nothing — a queue of
+    // 125 tracks had six repeated titles and removed none of them.
+    driver.setBrowseResult('SQ:1', [
+      { ...track('lib-a'), title: 'Eclipse', artist: 'Delta Goodrem' },
+      { ...track('lib-b'), title: 'Eclipse', artist: 'Delta Goodrem' },
+      { ...track('lib-c'), title: 'Poison', artist: 'Alice Cooper' },
+      { ...track('lib-d'), title: 'Poison', artist: 'Rita Ora' },
+    ])
+
+    await engine.activate(create())
+    await settle()
+
+    const queue = driver.queueOf(KITCHEN)
+    // One Eclipse, and both Poisons: same title, different artists, different songs.
+    expect(queue).toHaveLength(3)
+    expect(queue.filter((uri) => uri.startsWith('lib-a') || uri.startsWith('lib-b'))).toHaveLength(
+      1,
+    )
+    expect(queue).toContain('lib-c')
+    expect(queue).toContain('lib-d')
+  })
+
   it('removes blocked music from the queue', async () => {
     driver.setBrowseResult('SQ:1', [
       { ...track('a'), title: 'Last Christmas', artist: 'Wham!' },
