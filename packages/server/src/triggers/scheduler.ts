@@ -132,7 +132,7 @@ export class Scheduler {
     }
 
     try {
-      const result = await this.deps.engine.activate(preset)
+      const result = await this.deps.engine.activate(preset, { trigger: 'schedule' })
       this.logger.info(
         { triggerId, preset: preset.name, noop: result.noop, warnings: result.warnings },
         'scheduled activation',

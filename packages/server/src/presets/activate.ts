@@ -73,6 +73,16 @@ export type ActivationDeps = {
 
 export class ActivationEngine {
   private readonly logger: Logger
+  /**
+   * Activations under way, by preset.
+   *
+   * The idempotence check below reads the activation *record*, which is only
+   * written once the music is playing — so two taps a fraction apart both saw
+   * nothing running and both went ahead. Bedtime did exactly that: two
+   * activations 85ms apart, fighting over the grouping, the first ending up
+   * with a single room in it.
+   */
+  private readonly inFlight = new Map<string, Promise<ActivationResult>>()
   constructor(private readonly deps: ActivationDeps) {
     this.logger = deps.logger.child({ component: 'activation' })
   }
@@ -106,13 +116,53 @@ export class ActivationEngine {
    */
   async activate(
     preset: Preset,
-    options: { restart?: boolean; seed?: number } = {},
+    options: {
+      restart?: boolean
+      seed?: number
+      /**
+       * What asked for this — `homekit`, `webhook`, `schedule`, `ui`.
+       *
+       * Recorded because the log could not previously tell them apart: a
+       * HomeKit tap makes no HTTP request, so an activation that failed before
+       * it reached the timings line was indistinguishable from one that never
+       * happened.
+       */
+      trigger?: string
+    } = {},
   ): Promise<ActivationResult> {
+    const running = this.inFlight.get(preset.id)
+    if (running) {
+      // Joined rather than refused: a second tap wants the preset playing, and
+      // it is about to be. Refusing would report a failure for something that
+      // is working.
+      this.logger.info(
+        { presetId: preset.id, trigger: options.trigger ?? 'unknown' },
+        'activation already under way; joining it rather than starting a second',
+      )
+      return running
+    }
+
+    const run = this.runActivation(preset, options).finally(() => {
+      this.inFlight.delete(preset.id)
+    })
+    this.inFlight.set(preset.id, run)
+    return run
+  }
+
+  private async runActivation(
+    preset: Preset,
+    options: { restart?: boolean; seed?: number; trigger?: string },
+  ): Promise<ActivationResult> {
+    const trigger = options.trigger ?? 'unknown'
+    this.logger.info(
+      { presetId: preset.id, preset: preset.name, trigger, restart: options.restart ?? false },
+      'activating preset',
+    )
     const existing = this.liveActivation(preset.id)
     if (existing && !options.restart) {
       const stillPlaying = this.isStillPlaying(preset.id)
       if (stillPlaying) {
-        this.logger.info({ presetId: preset.id }, 'already active; no-op')
+        this.logger.info({ presetId: preset.id, trigger }, 'already active; no-op')
         return { activationId: existing.id, noop: true, warnings: [] }
       }
     }
@@ -140,7 +190,14 @@ export class ActivationEngine {
         return await run()
       } catch (err) {
         this.logger.error(
-          { err, presetId: preset.id, phases, failedAfter: lastPhase },
+          {
+            err,
+            presetId: preset.id,
+            preset: preset.name,
+            trigger,
+            phases,
+            failedAfter: lastPhase,
+          },
           'activation failed partway; speakers may be left regrouped and silent',
         )
         throw err

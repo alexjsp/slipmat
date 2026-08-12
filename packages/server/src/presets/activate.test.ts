@@ -1,6 +1,7 @@
 import type { PresetInput } from '@slipmat/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { openDatabase } from '../db/index.js'
+import { activations } from '../db/schema.js'
 import { createLogger } from '../logger.js'
 import type { DriverBrowseItem } from '../sonos/driver.js'
 import { FakeSonosDriver } from '../sonos/fake-driver.js'
@@ -246,6 +247,29 @@ describe('ActivationEngine', () => {
     expect(second.noop).toBe(true)
     expect(second.activationId).toBe(first.activationId)
     expect(driver.queueOf(KITCHEN)).toEqual(queueAfterFirst)
+  })
+
+  it('joins an activation already under way instead of starting a second', async () => {
+    // Bedtime did this for real: two taps 85ms apart, two activations, both
+    // rearranging the same speakers. The idempotence check could not see the
+    // first because the record it reads is only written once the music starts.
+    const preset = create()
+
+    const [first, second] = await Promise.all([
+      engine.activate(preset, { trigger: 'homekit' }),
+      engine.activate(preset, { trigger: 'homekit' }),
+    ])
+    await settle()
+
+    expect(second.activationId).toBe(first.activationId)
+    expect(driver.calls.filter((call) => call.method === 'clearQueue')).toHaveLength(1)
+    expect(
+      db
+        .select()
+        .from(activations)
+        .all()
+        .filter((row) => row.presetId === preset.id),
+    ).toHaveLength(1)
   })
 
   it('reshuffles on an explicit restart', async () => {

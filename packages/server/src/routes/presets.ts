@@ -113,7 +113,7 @@ export async function registerPresetRoutes(
     const preset = repo.get(id)
     if (!preset) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
     try {
-      return await engine.activate(preset)
+      return await engine.activate(preset, { trigger: 'ui' })
     } catch (err) {
       request.log.warn({ err, presetId: id }, 'activation failed')
       return reply.status(502).send({
@@ -127,7 +127,7 @@ export async function registerPresetRoutes(
     const { id } = idParamsSchema.parse(request.params)
     const preset = repo.get(id)
     if (!preset) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
-    return engine.activate(preset, { restart: true })
+    return engine.activate(preset, { restart: true, trigger: 'ui' })
   })
 
   app.post('/api/presets/:id/stop', async (request, reply) => {

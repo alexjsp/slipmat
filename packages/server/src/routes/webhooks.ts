@@ -46,13 +46,13 @@ export async function registerWebhookRoutes(app: FastifyInstance, deps: WebhookR
       case 'stop':
         return { stopped: await deps.engine.stop(preset.id) }
       case 'restart':
-        return deps.engine.activate(preset, { restart: true })
+        return deps.engine.activate(preset, { restart: true, trigger: 'webhook' })
       case 'toggle':
         return deps.engine.isStillPlaying(preset.id)
           ? { stopped: await deps.engine.stop(preset.id) }
-          : deps.engine.activate(preset)
+          : deps.engine.activate(preset, { trigger: 'webhook' })
       default:
-        return deps.engine.activate(preset)
+        return deps.engine.activate(preset, { trigger: 'webhook' })
     }
   }
 

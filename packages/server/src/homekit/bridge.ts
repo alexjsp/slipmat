@@ -71,7 +71,7 @@ export async function startHomeKitBridge(deps: HomeKitDeps): Promise<HomeKitBrid
         if (!preset) return
         try {
           if (value) {
-            await deps.engine.activate(preset)
+            await deps.engine.activate(preset, { trigger: 'homekit' })
           } else {
             await deps.engine.stop(presetId)
           }
@@ -94,6 +94,7 @@ export async function startHomeKitBridge(deps: HomeKitDeps): Promise<HomeKitBrid
     .onGet(() => false)
     .onSet(async (value) => {
       if (!value) return
+      logger.info('homekit pause-all switch set')
       await pauseAllMusic({
         driver: deps.driver,
         store: deps.store,
