@@ -60,6 +60,13 @@ export type DriverBrowseItem = {
   id: string
   title: string
   subtitle: string | null
+  /**
+   * The artist proper, where Sonos gives one.
+   *
+   * Distinct from `subtitle`, which falls back to the album so a browse row
+   * always has a second line — fine for display, wrong for matching an artist.
+   */
+  artist?: string | null
   album: string | null
   artUrl: string | null
   isContainer: boolean

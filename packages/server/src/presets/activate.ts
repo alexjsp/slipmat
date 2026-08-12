@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { ActivationResult, Preset, SourceKind } from '@slipmat/shared'
+import type { ActivationResult, BlockRule, Preset, SourceKind } from '@slipmat/shared'
 import { and, eq } from 'drizzle-orm'
 import type { Db } from '../db/index.js'
 import { activations } from '../db/schema.js'
@@ -9,6 +9,7 @@ import { classifyPlaybackKind, isProtectedFromPauseAll, trackIdentity } from '..
 import type { SourceCache } from '../sources/cache.js'
 import type { ResolvedTrack, ResolveOptions } from '../sources/resolver.js'
 import type { SystemStateStore } from '../state/store.js'
+import { compileBlocklist, isBlocked } from './blocklist.js'
 import type { PresetRepository } from './repository.js'
 import { pickCoordinator } from './repository.js'
 import { clockFrom, evaluateRules } from './rules.js'
@@ -67,6 +68,8 @@ export type ActivationDeps = {
   now?: () => Date
   /** Injectable so the random choice of opening source can be pinned in tests. */
   random?: () => number
+  /** Music never to play. Absent means no blocklist, which is the default. */
+  settings?: { blocklist(): BlockRule[] }
   /** Gap between background queue commands. Zero in tests; real time in life. */
   queueGapMs?: number
 }
@@ -830,7 +833,9 @@ export class ActivationEngine {
     }
     if (!this.isLive(activationId)) return
 
-    if (options.dedupe) await this.dedupeQueue(zoneId)
+    // Always run: the blocklist has to be applied even when deduplication is
+    // off, and it is the same pass over the same queue.
+    await this.dedupeQueue(zoneId, { dedupe: options.dedupe })
     if (!this.isLive(activationId)) return
 
     // Re-asserted now the queue is complete, so the shuffled order spans all of
@@ -880,7 +885,10 @@ export class ActivationEngine {
    * the queue. Removals go back to front because each one shifts the positions
    * after it.
    */
-  private async dedupeQueue(zoneId: string): Promise<void> {
+  private async dedupeQueue(zoneId: string, options: { dedupe: boolean }): Promise<void> {
+    const blocked = compileBlocklist(this.deps.settings?.blocklist() ?? [], this.logger)
+    if (!options.dedupe && blocked.length === 0) return
+
     const queue = await this.deps.driver.getQueue(zoneId)
     const group = this.deps.driver
       .snapshot()
@@ -890,28 +898,42 @@ export class ActivationEngine {
     const playing = trackIdentity(group?.currentTrackUri)
 
     const seen = new Set<string>()
-    const duplicates: number[] = []
+    const remove: number[] = []
+    let blockedCount = 0
     queue.forEach((item, index) => {
+      // Blocked first: a track you never want to hear should go whether or not
+      // it is also a duplicate.
+      if (isBlocked({ title: item.title, artist: item.artist, album: item.album }, blocked)) {
+        blockedCount += 1
+        remove.push(index + 1)
+        return
+      }
       const identity = trackIdentity(item.uri)
       if (!identity) return
       if (!seen.has(identity)) {
         seen.add(identity)
         return
       }
+      if (!options.dedupe) return
       if (identity === playing) return
-      duplicates.push(index + 1)
+      remove.push(index + 1)
     })
-    if (duplicates.length === 0) return
+    if (remove.length === 0) return
 
     const started = Date.now()
-    for (const position of duplicates.reverse()) {
+    for (const position of remove.reverse()) {
       await this.deps.driver.removeTrackFromQueue(zoneId, position).catch((err) => {
-        this.logger.debug({ err, position }, 'failed to remove duplicate')
+        this.logger.debug({ err, position }, 'failed to remove track')
       })
     }
     this.logger.info(
-      { removed: duplicates.length, of: queue.length, elapsedMs: Date.now() - started },
-      'deduped queue',
+      {
+        removed: remove.length,
+        blocked: blockedCount,
+        of: queue.length,
+        elapsedMs: Date.now() - started,
+      },
+      'pruned queue',
     )
   }
 

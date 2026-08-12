@@ -249,6 +249,60 @@ describe('ActivationEngine', () => {
     expect(driver.queueOf(KITCHEN)).toEqual(queueAfterFirst)
   })
 
+  it('removes blocked music from the queue', async () => {
+    driver.setBrowseResult('SQ:1', [
+      { ...track('a'), title: 'Last Christmas', artist: 'Wham!' },
+      { ...track('b'), title: 'Wichita Lineman', artist: 'Glen Campbell' },
+      { ...track('c'), title: 'Fairytale of New York', artist: 'The Pogues' },
+    ])
+    const blocked = new ActivationEngine({
+      db,
+      driver,
+      store,
+      cache,
+      logger,
+      repo,
+      timeZone: 'UTC',
+      queueGapMs: 0,
+      settings: {
+        blocklist: () => [
+          { field: 'any', match: 'contains', pattern: 'christmas', enabled: true },
+          { field: 'title', match: 'contains', pattern: 'fairytale', enabled: true },
+        ],
+      },
+    })
+
+    await blocked.activate(create())
+    await settle()
+
+    expect(driver.queueOf(KITCHEN)).toEqual(['b'])
+  })
+
+  it('applies the blocklist even when deduplication is off', async () => {
+    driver.setBrowseResult('SQ:1', [
+      { ...track('a'), title: 'Last Christmas', artist: 'Wham!' },
+      { ...track('b'), title: 'Wichita Lineman', artist: 'Glen Campbell' },
+    ])
+    const blocked = new ActivationEngine({
+      db,
+      driver,
+      store,
+      cache,
+      logger,
+      repo,
+      timeZone: 'UTC',
+      queueGapMs: 0,
+      settings: {
+        blocklist: () => [{ field: 'any', match: 'contains', pattern: 'christmas', enabled: true }],
+      },
+    })
+
+    await blocked.activate(create({ dedupe: false }))
+    await settle()
+
+    expect(driver.queueOf(KITCHEN)).toEqual(['b'])
+  })
+
   it('joins an activation already under way instead of starting a second', async () => {
     // Bedtime did this for real: two taps 85ms apart, two activations, both
     // rearranging the same speakers. The idempotence check could not see the

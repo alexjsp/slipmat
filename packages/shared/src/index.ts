@@ -1,4 +1,5 @@
 export * from './api.js'
+export * from './blocklist.js'
 export * from './events.js'
 export * from './presets.js'
 export * from './rules.js'

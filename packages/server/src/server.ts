@@ -86,6 +86,7 @@ export async function buildServer({
       : openDatabase({ dataDir: config.dataDir })
   const cache = new SourceCache(db, resolver, logger)
   const repo = new PresetRepository(db)
+  const settings = new SettingsStore(db)
   const engine = new ActivationEngine({
     db,
     driver,
@@ -94,8 +95,8 @@ export async function buildServer({
     logger,
     repo,
     timeZone: config.timeZone,
+    settings,
   })
-  const settings = new SettingsStore(db)
 
   // Reality can drift while we're not looking (someone pauses in the Sonos app,
   // a speaker reboots), so re-derive active state whenever anything changes.

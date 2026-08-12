@@ -668,6 +668,7 @@ export class RealSonosDriver implements SonosDriver {
         id: entry.id,
         title: entry.title || 'Unknown',
         subtitle: entry.creator ?? entry.album ?? null,
+        artist: entry.creator,
         album: entry.album,
         artUrl: entry.albumArtUri
           ? new URL(entry.albumArtUri, `http://${device.Host}:1400`).toString()
@@ -727,6 +728,7 @@ export class RealSonosDriver implements SonosDriver {
       id: entry.id,
       title: entry.title || 'Unknown',
       subtitle: entry.creator ?? entry.album ?? null,
+      artist: entry.creator,
       album: entry.album,
       artUrl: entry.albumArtUri
         ? new URL(entry.albumArtUri, `http://${device.Host}:1400`).toString()

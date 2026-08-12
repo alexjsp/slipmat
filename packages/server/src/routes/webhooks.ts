@@ -1,3 +1,4 @@
+import { blocklistSchema } from '@slipmat/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { ActivationEngine } from '../presets/activate.js'
@@ -97,4 +98,12 @@ export async function registerWebhookRoutes(app: FastifyInstance, deps: WebhookR
   app.post('/api/pause-all/regenerate-token', async () => ({
     token: deps.settings.regeneratePauseAllToken(),
   }))
+
+  app.get('/api/blocklist', async () => ({ rules: deps.settings.blocklist() }))
+
+  app.put('/api/blocklist', async (request) => {
+    const body = z.object({ rules: blocklistSchema }).parse(request.body)
+    deps.settings.setBlocklist(body.rules)
+    return { rules: deps.settings.blocklist() }
+  })
 }

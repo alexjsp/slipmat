@@ -54,6 +54,11 @@ export function saveRules(presetId: string, rules: unknown[]): Promise<unknown> 
   return request('PUT', `/api/presets/${presetId}/rules`, { rules })
 }
 
+/** Replace the list of music never to play. */
+export function saveBlocklist(rules: unknown[]): Promise<unknown> {
+  return request('PUT', '/api/blocklist', { rules })
+}
+
 export const api = {
   play: (zoneId: string) => request('POST', `/api/zones/${zoneId}/play`),
   pause: (zoneId: string) => request('POST', `/api/zones/${zoneId}/pause`),

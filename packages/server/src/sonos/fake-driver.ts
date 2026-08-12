@@ -361,8 +361,17 @@ export class FakeSonosDriver implements SonosDriver {
       const expansion = this.containers.get(item.uri)
       if (expansion) {
         group.queue.push(...expansion)
-      } else {
-        group.queue.push({
+        continue
+      }
+      // A real queue read comes back with the track's title, artist and album,
+      // whether the track arrived via a container or one at a time. Synthesising
+      // a bare row here would have quietly hidden anything that matches on
+      // metadata — the blocklist, for one.
+      const known = [...this.browseTree.values()]
+        .flat()
+        .find((candidate) => candidate.uri === item.uri)
+      group.queue.push(
+        known ?? {
           id: item.uri,
           title: item.uri,
           subtitle: null,
@@ -371,8 +380,8 @@ export class FakeSonosDriver implements SonosDriver {
           isContainer: false,
           uri: item.uri,
           metadata: item.metadata ?? null,
-        })
-      }
+        },
+      )
     }
     this.changed()
   }

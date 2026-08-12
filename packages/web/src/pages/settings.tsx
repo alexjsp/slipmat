@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Check, Copy } from 'lucide-react'
 import { useState } from 'react'
+import { BlocklistEditor } from '@/components/blocklist-editor'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -17,6 +18,8 @@ export function SettingsPage() {
   return (
     <div className="flex flex-col gap-4">
       <h2 className="font-semibold text-lg">Settings</h2>
+
+      <BlocklistEditor />
 
       <Card className="gap-3 p-4">
         <h3 className="font-medium text-sm">HomeKit</h3>
