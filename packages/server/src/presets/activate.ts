@@ -122,9 +122,29 @@ export class ActivationEngine {
     // it is made of a dozen sequential SOAP calls that are easy to misattribute.
     const phases: Record<string, number> = {}
     let mark = Date.now()
+    let lastPhase = 'start'
     const took = (phase: string) => {
       phases[phase] = Date.now() - mark
+      lastPhase = phase
       mark = Date.now()
+    }
+    /**
+     * Everything from the first speaker command to Play, so a failure in the
+     * middle is not silent. It used to be: `activation timings` is only written
+     * once Play returns, and nothing in between was wrapped, so an activation
+     * that regrouped the house and then threw left no trace at all — no error,
+     * no timings, not even an activation row.
+     */
+    const speakerWork = async <T>(run: () => Promise<T>): Promise<T> => {
+      try {
+        return await run()
+      } catch (err) {
+        this.logger.error(
+          { err, presetId: preset.id, phases, failedAfter: lastPhase },
+          'activation failed partway; speakers may be left regrouped and silent',
+        )
+        throw err
+      }
     }
 
     const snapshot = this.deps.driver.snapshot()
@@ -170,6 +190,26 @@ export class ActivationEngine {
     took('resolve')
     const streamSource = resolved.find((source) => source.mode === 'stream')
     const containerOnly = resolved.filter((source) => source.mode === 'container_only')
+
+    // Nothing playable means stop here, before a single speaker is touched.
+    // This check used to sit after the grouping, so a preset whose sources had
+    // all failed would rearrange the whole house and then abort — leaving every
+    // room ungrouped and silent, which is exactly how it looks from the sofa.
+    // Playable means there is actually something to hand Sonos: a container it
+    // can expand, or tracks to enqueue. A source can resolve "successfully" to
+    // neither — an empty playlist comes back as container-only with no
+    // container URI — and counting that as playable is how an activation gets
+    // far enough to rearrange the house before discovering it has no music.
+    const playableSources = resolved.filter(
+      (source) =>
+        (source.mode === 'tracks' || source.mode === 'container_only') &&
+        (source.containerUri !== null || source.tracks.length > 0),
+    )
+    if (!resolved.some((source) => source.mode === 'stream') && playableSources.length === 0) {
+      throw new Error(
+        `${preset.name} has nothing playable: ${warnings.join('; ') || 'no sources resolved'}`,
+      )
+    }
 
     // Supersede anything already running that overlaps these speakers.
     this.invalidateOverlapping(
@@ -234,14 +274,9 @@ export class ActivationEngine {
     // shuffle picks across the whole of it, which is the same thing a listener
     // hears. Deduplication moves onto the queue afterwards, where a removal
     // costs about 4ms.
-    const playable = resolved.filter(
-      (source) => source.mode === 'tracks' || source.mode === 'container_only',
-    )
-    if (playable.length === 0) {
-      throw new Error(`${preset.name} has no playable sources`)
-    }
+    const playable = playableSources
 
-    await this.deps.driver.clearQueue(coordinator.zoneId)
+    await speakerWork(() => this.deps.driver.clearQueue(coordinator.zoneId))
     took('clearQueue')
     // Sonos answers a container enqueue only once it has expanded the whole
     // thing — 1s for a 25-track mix, 44s for a 2,000-track playlist — so which
@@ -251,11 +286,13 @@ export class ActivationEngine {
     // the playback order and must be left alone.
     const ordered = flags.shuffle ? this.orderForFastStart(playable) : playable
     const [head, ...tail] = ordered
-    await this.enqueueSource(coordinator.zoneId, head!)
+    await speakerWork(() => this.enqueueSource(coordinator.zoneId, head!))
     took('enqueueHead')
 
-    await this.deps.driver.setPlayMode(coordinator.zoneId, playModeFor(flags))
-    await this.deps.driver.setTransportToQueue(coordinator.zoneId)
+    await speakerWork(async () => {
+      await this.deps.driver.setPlayMode(coordinator.zoneId, playModeFor(flags))
+      await this.deps.driver.setTransportToQueue(coordinator.zoneId)
+    })
     // Otherwise every activation opens on the same song: Sonos always begins at
     // shuffled position 1 and keeps the same track there.
     //
@@ -274,7 +311,7 @@ export class ActivationEngine {
 
     if (flags.shuffle && flags.repeatAll) await this.startSomewhereRandom(coordinator.zoneId)
     took('startPoint')
-    await this.deps.driver.play(coordinator.zoneId)
+    await speakerWork(() => this.deps.driver.play(coordinator.zoneId))
     took('play')
     this.logger.info(
       {

@@ -166,6 +166,20 @@ describe('ActivationEngine', () => {
     expect(group?.memberZoneIds.sort()).toEqual([BEDROOM, KITCHEN])
   })
 
+  it('refuses before touching a speaker when nothing will play', async () => {
+    // This is how a morning went wrong: the check for anything playable sat
+    // after the grouping, so a preset whose sources had all failed rearranged
+    // the house and then aborted — every room ungrouped, nothing playing.
+    driver.setBrowseResult('SQ:1', [])
+    const preset = create()
+
+    await expect(engine.activate(preset)).rejects.toThrow(/nothing playable/)
+
+    expect(driver.calls.some((call) => call.method === 'leaveGroup')).toBe(false)
+    expect(driver.calls.some((call) => call.method === 'joinGroup')).toBe(false)
+    expect(driver.calls.some((call) => call.method === 'clearQueue')).toBe(false)
+  })
+
   it('never mutes a speaker, so none can be left silent by a failed join', async () => {
     // There is no muting to undo any more. Play comes after the volumes, so a
     // speaker that never joins simply is not in the group and never makes a
