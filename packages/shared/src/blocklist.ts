@@ -7,11 +7,13 @@ export type BlockField = z.infer<typeof blockFieldSchema>
 /**
  * How the pattern is compared.
  *
- * `is` and `contains` are plain text, which is what almost every rule wants —
- * naming an artist, or catching a word. `matches` is a regular expression, for
- * the times nothing simpler will do.
+ * All plain text bar the last: naming an artist exactly, catching a word
+ * anywhere, or anchoring to either end of the field. `matches` is a regular
+ * expression, for the times nothing simpler will do.
+ *
+ * Ordered loosest-last, which is the order they appear in the dropdown.
  */
-export const blockMatchSchema = z.enum(['is', 'contains', 'matches'])
+export const blockMatchSchema = z.enum(['is', 'begins', 'ends', 'contains', 'matches'])
 export type BlockMatch = z.infer<typeof blockMatchSchema>
 
 export const blockRuleSchema = z.object({

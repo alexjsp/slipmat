@@ -17,6 +17,8 @@ const FIELD_LABELS: Record<BlockRule['field'], string> = {
 
 const MATCH_LABELS: Record<BlockRule['match'], string> = {
   is: 'is',
+  begins: 'begins with',
+  ends: 'ends with',
   contains: 'contains',
   matches: 'matches',
 }

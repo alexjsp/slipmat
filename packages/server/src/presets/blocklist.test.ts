@@ -42,6 +42,28 @@ describe('blocklist', () => {
     expect(blocks([rule({ field: 'title', match: 'is', pattern: 'Christmas' })])).toBe(false)
   })
 
+  it('anchors "begins with" to the start of the field', () => {
+    expect(blocks([rule({ field: 'title', match: 'begins', pattern: 'Last' })])).toBe(true)
+    expect(blocks([rule({ field: 'title', match: 'begins', pattern: 'last chr' })])).toBe(true)
+    // Present, but not at the start.
+    expect(blocks([rule({ field: 'title', match: 'begins', pattern: 'Christmas' })])).toBe(false)
+  })
+
+  it('anchors "ends with" to the end of the field', () => {
+    expect(blocks([rule({ field: 'title', match: 'ends', pattern: 'Christmas' })])).toBe(true)
+    expect(blocks([rule({ field: 'album', match: 'ends', pattern: 'heaven' })])).toBe(true)
+    expect(blocks([rule({ field: 'title', match: 'ends', pattern: 'Last' })])).toBe(false)
+  })
+
+  it('ignores surrounding whitespace when anchoring', () => {
+    // A title padded by the service should still match a rule anchored to it.
+    const padded = { title: '  Last Christmas ', artist: null, album: null }
+    expect(blocks([rule({ field: 'title', match: 'begins', pattern: 'Last' })], padded)).toBe(true)
+    expect(blocks([rule({ field: 'title', match: 'ends', pattern: 'Christmas' })], padded)).toBe(
+      true,
+    )
+  })
+
   it('treats "matches" as a regular expression', () => {
     expect(blocks([rule({ match: 'matches', pattern: '^last\\b' })])).toBe(true)
     expect(blocks([rule({ match: 'matches', pattern: 'christmas$' })])).toBe(true)

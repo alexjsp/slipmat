@@ -29,6 +29,24 @@ export function compileBlocklist(rules: BlockRule[], logger?: Logger): CompiledR
       continue
     }
 
+    if (rule.match === 'begins') {
+      const needle = rule.pattern.trim().toLowerCase()
+      compiled.push({
+        field: rule.field,
+        test: (value) => value.trim().toLowerCase().startsWith(needle),
+      })
+      continue
+    }
+
+    if (rule.match === 'ends') {
+      const needle = rule.pattern.trim().toLowerCase()
+      compiled.push({
+        field: rule.field,
+        test: (value) => value.trim().toLowerCase().endsWith(needle),
+      })
+      continue
+    }
+
     if (rule.match === 'contains') {
       const needle = rule.pattern.toLowerCase()
       compiled.push({ field: rule.field, test: (value) => value.toLowerCase().includes(needle) })
