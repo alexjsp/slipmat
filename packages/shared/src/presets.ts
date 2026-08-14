@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { presetRuleInputSchema, ruleSourceSchema } from './rules.js'
 import { presetSourceSchema } from './sources.js'
 
 export const presetZoneSchema = z.object({
@@ -38,7 +39,19 @@ export const presetSchema = z.object({
   icon: z.string().nullable(),
   color: z.string().nullable(),
   zones: z.array(presetZoneSchema).min(1),
-  sources: z.array(presetSourceSchema).min(1),
+  /**
+   * May be empty when the preset's rules supply the music instead — a preset
+   * that only rotates through three playlists has no base of its own.
+   */
+  sources: z.array(presetSourceSchema),
+  /**
+   * Everything the preset's rules could contribute, deduplicated.
+   *
+   * Derived rather than stored, and filled in by the API alongside the resolver
+   * metadata on `sources`. A preset that owns nothing and rotates through three
+   * playlists would otherwise show an empty line where its music should be.
+   */
+  ruleSources: z.array(ruleSourceSchema).default([]),
   /** Off plays every source end to end, in the order they were added. */
   shuffle: z.boolean(),
   repeatAll: z.boolean(),
@@ -71,15 +84,23 @@ export const presetInputSchema = z
         }),
       )
       .min(1),
-    sources: z
-      .array(
-        z.object({
-          kind: presetSourceSchema.shape.kind,
-          ref: z.string().min(1),
-          label: z.string().min(1),
-        }),
-      )
-      .min(1),
+    /**
+     * May be empty when `rules` supplies the music instead. The two are
+     * validated together, so neither can be saved leaving nothing to play.
+     */
+    sources: z.array(
+      z.object({
+        kind: presetSourceSchema.shape.kind,
+        ref: z.string().min(1),
+        label: z.string().min(1),
+      }),
+    ),
+    /**
+     * Sent with the preset so a rotation and the preset it belongs to land in
+     * one transaction. Absent — as opposed to empty — leaves existing rules
+     * alone, which is what an editor that could not load them should do.
+     */
+    rules: z.array(presetRuleInputSchema).optional(),
     shuffle: z.boolean().default(true),
     repeatAll: z.boolean().default(true),
     dedupe: z.boolean().default(true),

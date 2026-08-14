@@ -64,14 +64,106 @@ describe('preset and webhook routes', () => {
     ])
   })
 
-  it('rejects a preset with no zones or no sources', async () => {
-    for (const payload of [
-      { ...validPreset, zones: [] },
-      { ...validPreset, sources: [] },
-    ]) {
-      const res = await app.inject({ method: 'POST', url: '/api/presets', payload })
-      expect(res.statusCode).toBe(400)
+  it('rejects a preset with no zones', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/presets',
+      payload: { ...validPreset, zones: [] },
+    })
+    expect(res.statusCode).toBe(400)
+  })
+
+  describe('a preset whose music comes from its rules', () => {
+    const rotation = {
+      label: 'Rotate',
+      enabled: true,
+      condition: {},
+      effect: {
+        rotateSources: {
+          period: 'day',
+          sources: [
+            { kind: 'raw_uri', ref: 'x-sonos-http:song:a.mp4', label: 'A' },
+            { kind: 'raw_uri', ref: 'x-sonos-http:song:b.mp4', label: 'B' },
+          ],
+        },
+      },
     }
+
+    const conditional = { ...rotation, condition: { months: [12] } }
+
+    const putRules = (id: string, rules: unknown[]) =>
+      app.inject({ method: 'PUT', url: `/api/presets/${id}/rules`, payload: { rules } })
+
+    it('lists what its rules can play, so the card is not blank', async () => {
+      await create({ sources: [], rules: [rotation] })
+      const listed = (await app.inject({ method: 'GET', url: '/api/presets' })).json().presets[0]
+      expect(listed.sources).toEqual([])
+      expect(listed.ruleSources.map((source: { label: string }) => source.label)).toEqual([
+        'A',
+        'B',
+      ])
+    })
+
+    it('is created in one request, rules and all', async () => {
+      const preset = await create({ sources: [], rules: [rotation] })
+      const res = await app.inject({ method: 'GET', url: `/api/presets/${preset.id}/rules` })
+      expect(res.json().rules).toHaveLength(1)
+      // Whichever arm today lands on, there is something to play.
+      expect(res.json().preview.sources).toHaveLength(1)
+    })
+
+    it('cannot be created without the rule it depends on', async () => {
+      for (const payload of [
+        { ...validPreset, sources: [] },
+        { ...validPreset, sources: [], rules: [conditional] },
+      ]) {
+        const res = await app.inject({ method: 'POST', url: '/api/presets', payload })
+        expect(res.statusCode).toBe(400)
+        expect(res.json().error).toBe('nothing_to_play')
+      }
+      expect((await app.inject({ method: 'GET', url: '/api/presets' })).json().presets).toEqual([])
+    })
+
+    it('cannot have its last source and its rules removed at once', async () => {
+      const preset = await create({ sources: [], rules: [rotation] })
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/presets/${preset.id}`,
+        payload: { ...validPreset, sources: [], rules: [] },
+      })
+      expect(res.statusCode).toBe(400)
+      // Still intact, rules and all.
+      const after = await app.inject({ method: 'GET', url: `/api/presets/${preset.id}/rules` })
+      expect(after.json().rules).toHaveLength(1)
+    })
+
+    it('keeps its stored rules when a save leaves them out', async () => {
+      const preset = await create({ sources: [], rules: [rotation] })
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/presets/${preset.id}`,
+        payload: { ...validPreset, sources: [], name: 'Renamed' },
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().preset.name).toBe('Renamed')
+      const after = await app.inject({ method: 'GET', url: `/api/presets/${preset.id}/rules` })
+      expect(after.json().rules).toHaveLength(1)
+    })
+
+    it('will not accept rules that leave it silent on some days', async () => {
+      const preset = await create({ sources: [], rules: [rotation] })
+      const res = await putRules(preset.id, [conditional])
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toBe('nothing_to_play')
+      // The rejected rules were not written.
+      const after = await app.inject({ method: 'GET', url: `/api/presets/${preset.id}/rules` })
+      expect(after.json().rules[0].label).toBe('Rotate')
+    })
+
+    it('still allows a conditional rule when the preset has its own sources', async () => {
+      const preset = await create()
+      expect((await putRules(preset.id, [conditional])).statusCode).toBe(200)
+    })
   })
 
   it('updates and deletes', async () => {

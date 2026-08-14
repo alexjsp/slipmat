@@ -1,5 +1,10 @@
-import type { Preset, PresetStatus } from '@slipmat/shared'
-import { presetInputSchema, presetRuleInputSchema } from '@slipmat/shared'
+import type { Preset, PresetRule, PresetStatus, RuleCondition, RuleEffect } from '@slipmat/shared'
+import {
+  presetInputSchema,
+  presetRuleInputSchema,
+  rulesGuaranteeASource,
+  sourcesFromRules,
+} from '@slipmat/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { ActivationEngine } from '../presets/activate.js'
@@ -29,9 +34,14 @@ export async function registerPresetRoutes(
   const zoneNames = () =>
     new Map(driver.snapshot().zones.map((zone) => [zone.id, zone.name] as const))
 
-  /** Attach what the resolver cache already knows, without resolving anything. */
+  /**
+   * Attach what the resolver cache already knows, without resolving anything,
+   * and what the preset's rules could play — which for a preset with no sources
+   * of its own is all of its music.
+   */
   const withSourceMeta = (preset: Preset): Preset => ({
     ...preset,
+    ruleSources: sourcesFromRules(repo.rulesFor(preset.id)),
     sources: preset.sources.map((source) => {
       const cached = cache.peek({ kind: source.kind, ref: source.ref })
       return {
@@ -80,22 +90,46 @@ export async function registerPresetRoutes(
     return { preset: withSourceMeta(preset), status: statusOf(preset) }
   })
 
+  /**
+   * A preset has to have something to play, but it does not have to own it: a
+   * rule with no conditions counts, which is what lets a preset be nothing but
+   * "rotate through these three playlists".
+   */
+  const nothingToPlay = (
+    sources: unknown[],
+    rules: Array<{ enabled: boolean; condition: RuleCondition; effect: RuleEffect }>,
+  ) => sources.length === 0 && !rulesGuaranteeASource(rules)
+
+  const silentPresetError = {
+    error: 'nothing_to_play',
+    message:
+      'This preset has no sources of its own, so it needs a rule with no conditions that plays something',
+  }
+
   app.post('/api/presets', async (request, reply) => {
     const input = presetInputSchema.parse(request.body)
+    if (nothingToPlay(input.sources, input.rules ?? [])) {
+      return reply.status(400).send(silentPresetError)
+    }
     const preset = repo.create(input, zoneNames())
     changed()
     // Warm the cache in the background so the first activation is instant.
-    void warmSources(cache, preset)
+    void warmSources(cache, preset, repo.rulesFor(preset.id))
     return reply.status(201).send({ preset: withSourceMeta(preset) })
   })
 
   app.patch('/api/presets/:id', async (request, reply) => {
     const { id } = idParamsSchema.parse(request.params)
     const input = presetInputSchema.parse(request.body)
+    // Rules left out of the request are the ones already stored, and they are
+    // what the preset will still be relying on afterwards.
+    if (nothingToPlay(input.sources, input.rules ?? repo.rulesFor(id))) {
+      return reply.status(400).send(silentPresetError)
+    }
     const preset = repo.update(id, input, zoneNames())
     if (!preset) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
     changed()
-    void warmSources(cache, preset)
+    void warmSources(cache, preset, repo.rulesFor(id))
     return { preset: withSourceMeta(preset) }
   })
 
@@ -177,24 +211,19 @@ export async function registerPresetRoutes(
     if (!preset) return reply.status(404).send({ error: 'not_found', message: 'No such preset' })
 
     const body = z.object({ rules: z.array(presetRuleInputSchema) }).parse(request.body)
+
+    // A preset with no sources of its own leans entirely on its rules. Saving
+    // rules that no longer cover every day would leave it silent on the days
+    // they miss, and the only way to find that out is to wait for one.
+    if (nothingToPlay(preset.sources, body.rules)) {
+      return reply.status(400).send(silentPresetError)
+    }
+
     const rules = repo.setRules(id, body.rules)
 
     // Rules can introduce sources the cache has never seen; warm them now so
     // the first matching activation isn't the one that pays for a cold resolve.
-    // Sequentially, for the same reason as everywhere else: resolving an
-    // expensive source borrows a speaker, and this system does not like being
-    // asked for several things at once.
-    void (async () => {
-      for (const rule of rules) {
-        for (const source of [
-          ...(rule.effect.addSources ?? []),
-          ...(rule.effect.replaceSources ?? []),
-          ...(rule.effect.rotateSources?.sources ?? []),
-        ]) {
-          await cache.get(source).catch(() => undefined)
-        }
-      }
-    })()
+    void warmSources(cache, preset, rules)
 
     return {
       rules,
@@ -205,14 +234,29 @@ export async function registerPresetRoutes(
   app.get('/api/presets/export', async () => ({ presets: repo.list() }))
 }
 
-async function warmSources(cache: SourceCache, preset: Preset) {
+async function warmSources(cache: SourceCache, preset: Preset, rules: PresetRule[] = []) {
+  // Rules included: they can introduce sources the preset never mentions, and a
+  // preset with no sources of its own has nothing else to warm.
+  const sources = [
+    ...preset.sources.map((source) => ({
+      kind: source.kind,
+      ref: source.ref,
+      label: source.label,
+    })),
+    ...rules.flatMap((rule) => [
+      ...(rule.effect.addSources ?? []),
+      ...(rule.effect.replaceSources ?? []),
+      ...(rule.effect.rotateSources?.sources ?? []),
+    ]),
+  ]
+
   // One source at a time. Resolving an expensive one borrows a speaker's queue,
   // and several at once means several speakers borrowed simultaneously — on a
   // system that reacts badly to being asked for more than one thing at a time.
   // Nobody is waiting on this; it runs after the save has been answered.
-  for (const source of preset.sources) {
+  for (const source of sources) {
     try {
-      await cache.get({ kind: source.kind, ref: source.ref, label: source.label })
+      await cache.get(source)
     } catch {
       // A source that will not resolve is surfaced when the preset is used.
     }

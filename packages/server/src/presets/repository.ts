@@ -160,6 +160,26 @@ export class PresetRepository {
         })
         .run()
     }
+
+    // Absent means "leave them as they are"; empty means "there are none".
+    if (input.rules) this.writeRules(tx, presetId, input.rules)
+  }
+
+  private writeRules(tx: DbTx, presetId: string, rules: PresetRuleInput[]) {
+    tx.delete(presetRules).where(eq(presetRules.presetId, presetId)).run()
+    for (const [position, rule] of rules.entries()) {
+      tx.insert(presetRules)
+        .values({
+          id: randomUUID(),
+          presetId,
+          position,
+          label: rule.label,
+          enabled: rule.enabled,
+          conditionJson: JSON.stringify(rule.condition),
+          effectJson: JSON.stringify(rule.effect),
+        })
+        .run()
+    }
   }
 
   /** Rules for a preset, in the order they should be applied. */
@@ -183,22 +203,7 @@ export class PresetRepository {
 
   /** Replaced wholesale — rules are few, ordered, and edited as a list. */
   setRules(presetId: string, rules: PresetRuleInput[]): PresetRule[] {
-    this.db.transaction((tx) => {
-      tx.delete(presetRules).where(eq(presetRules.presetId, presetId)).run()
-      for (const [position, rule] of rules.entries()) {
-        tx.insert(presetRules)
-          .values({
-            id: randomUUID(),
-            presetId,
-            position,
-            label: rule.label,
-            enabled: rule.enabled,
-            conditionJson: JSON.stringify(rule.condition),
-            effectJson: JSON.stringify(rule.effect),
-          })
-          .run()
-      }
-    })
+    this.db.transaction((tx) => this.writeRules(tx, presetId, rules))
     return this.rulesFor(presetId)
   }
 
@@ -245,6 +250,8 @@ export class PresetRepository {
       color: row.color,
       zones,
       sources,
+      // Derived for display; the API fills it in from this preset's rules.
+      ruleSources: [],
       shuffle: row.shuffle,
       repeatAll: row.repeatAll,
       dedupe: row.dedupe,

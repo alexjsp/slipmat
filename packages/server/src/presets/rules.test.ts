@@ -1,4 +1,5 @@
 import type { Preset, PresetRule, Rotation } from '@slipmat/shared'
+import { rulesGuaranteeASource } from '@slipmat/shared'
 import { describe, expect, it } from 'vitest'
 import { type Clock, clockFrom, conditionMatches, evaluateRules, rotationPick } from './rules.js'
 
@@ -330,6 +331,41 @@ describe('rotations', () => {
       clock({ epochDay: 20_002 }),
     )
     expect(result.sources.map((s) => s.ref)).toEqual(['SQ:essential'])
+  })
+})
+
+describe('rulesGuaranteeASource', () => {
+  const source = { kind: 'sonos_playlist' as const, ref: 'SQ:9', label: 'Something' }
+  const unconditional = { enabled: true, condition: {}, effect: { addSources: [source] } }
+
+  it('accepts a rule that always applies and plays something', () => {
+    expect(rulesGuaranteeASource([unconditional])).toBe(true)
+    expect(
+      rulesGuaranteeASource([
+        { ...unconditional, effect: { rotateSources: { period: 'day', sources: [source] } } },
+      ]),
+    ).toBe(true)
+  })
+
+  it('reads an empty day or month list as "any", the same as the matcher', () => {
+    expect(
+      rulesGuaranteeASource([{ ...unconditional, condition: { daysOfWeek: [], months: [] } }]),
+    ).toBe(true)
+  })
+
+  it('rejects anything that could fail to apply', () => {
+    expect(rulesGuaranteeASource([])).toBe(false)
+    expect(rulesGuaranteeASource([{ ...unconditional, enabled: false }])).toBe(false)
+    expect(rulesGuaranteeASource([{ ...unconditional, condition: { months: [12] } }])).toBe(false)
+    expect(
+      rulesGuaranteeASource([{ ...unconditional, condition: { daysOfWeek: [1, 2, 3] } }]),
+    ).toBe(false)
+    expect(rulesGuaranteeASource([{ ...unconditional, effect: {} }])).toBe(false)
+  })
+
+  it('rejects a set where anything could replace the queue with nothing', () => {
+    const wipe = { enabled: true, condition: { months: [12] }, effect: { replaceSources: [] } }
+    expect(rulesGuaranteeASource([unconditional, wipe])).toBe(false)
   })
 })
 

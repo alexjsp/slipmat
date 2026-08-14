@@ -43,17 +43,6 @@ export function getJson<T>(path: string): Promise<T> {
   return request('GET', path) as Promise<T>
 }
 
-/**
- * Replace a preset's rules.
- *
- * Called from the preset form's own Save rather than a button of its own: rules
- * are part of the preset as far as anyone editing one is concerned, and a second
- * save button meant half your changes could persist and half be lost.
- */
-export function saveRules(presetId: string, rules: unknown[]): Promise<unknown> {
-  return request('PUT', `/api/presets/${presetId}/rules`, { rules })
-}
-
 /** Replace the list of music never to play. */
 export function saveBlocklist(rules: unknown[]): Promise<unknown> {
   return request('PUT', '/api/blocklist', { rules })

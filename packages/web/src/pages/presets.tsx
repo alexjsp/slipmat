@@ -134,6 +134,15 @@ function PresetTile({
           </p>
           <p className="truncate text-muted-foreground text-xs">
             {preset.sources.map((source) => source.label).join(', ')}
+            {/* What the rules can bring. Only some of it plays on any given
+                day, hence "or" — but a preset with no sources of its own would
+                otherwise show an empty line where its music should be. */}
+            {preset.ruleSources.length > 0 && (
+              <span className="opacity-75">
+                {preset.sources.length > 0 && ' · or '}
+                {preset.ruleSources.map((source) => source.label).join(', ')}
+              </span>
+            )}
           </p>
         </div>
 

@@ -1,4 +1,5 @@
 import type { Preset, PresetInput, Zone } from '@slipmat/shared'
+import { rulesGuaranteeASource } from '@slipmat/shared'
 import { Check, Copy, GripVertical, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import {
@@ -21,7 +22,7 @@ import {
 } from '@/components/ui/sheet'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
-import { getJson, saveRules } from '@/lib/api'
+import { getJson } from '@/lib/api'
 import { usePresetMutations, webhookUrl } from '@/lib/presets'
 import { useHomeKit } from '@/lib/use-homekit'
 import { cn } from '@/lib/utils'
@@ -86,6 +87,8 @@ export function PresetEditor({
   // Rules live here rather than inside RuleEditor so they are saved by the one
   // Save button, and so a preset can carry rules before it exists.
   const [rules, setRules] = useState<DraftRule[]>([])
+  /** False while an existing preset's rules are in flight, or if they failed. */
+  const [rulesLoaded, setRulesLoaded] = useState(true)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -99,8 +102,10 @@ export function PresetEditor({
     setError(null)
     if (!preset) {
       setRules([])
+      setRulesLoaded(true)
       return
     }
+    setRulesLoaded(false)
     let cancelled = false
     getJson<RulesResponse>(`/api/presets/${preset.id}/rules`)
       .then((data) => {
@@ -114,11 +119,13 @@ export function PresetEditor({
             effect: rule.effect,
           })),
         )
+        setRulesLoaded(true)
       })
       .catch(() => {
-        // The preset is still editable without its rules; saving would wipe
-        // them, so say so rather than quietly presenting an empty list.
-        if (!cancelled) setError('Existing rules could not be loaded — saving would remove them.')
+        // The preset stays editable without its rules — the save simply leaves
+        // them out, and the server keeps whatever it already had.
+        if (!cancelled)
+          setError('Existing rules could not be loaded — they will be left as they are.')
       })
     return () => {
       cancelled = true
@@ -168,27 +175,28 @@ export function PresetEditor({
   const allZonesKept =
     draft.shrink !== null && draft.shrink.keepZoneIds.length >= draft.zones.length
 
+  // A preset needs something to play, but it does not have to be its own: a
+  // rule that always applies — "rotate through these three" — is enough.
+  const rulesCoverIt = rulesGuaranteeASource(rules)
+
   const canSave =
     draft.name.trim() !== '' &&
     draft.zones.length > 0 &&
-    draft.sources.length > 0 &&
+    (draft.sources.length > 0 || rulesCoverIt) &&
     // The server rejects these too; blocking Save says so before a round trip.
     !allZonesKept
 
   const save = async () => {
     setError(null)
     try {
-      // Rules are saved after the preset, because a new one has no id to hang
-      // them off until it exists.
-      const saved = preset
-        ? await mutations.update.mutateAsync({ id: preset.id, input: draft })
-        : await mutations.create.mutateAsync(draft)
-      const id = preset?.id ?? saved?.preset.id
-      if (id)
-        await saveRules(
-          id,
-          rules.map(({ key, ...rule }) => rule),
-        )
+      // Preset and rules go up together, so a preset that leans on a rule for
+      // its music can never be saved without it. Rules are omitted entirely
+      // when they could not be loaded, which leaves the stored ones alone.
+      const input: PresetInput = rulesLoaded
+        ? { ...draft, rules: rules.map(({ key, ...rule }) => rule) }
+        : draft
+      if (preset) await mutations.update.mutateAsync({ id: preset.id, input })
+      else await mutations.create.mutateAsync(input)
       onOpenChange(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save this preset')
@@ -314,7 +322,9 @@ export function PresetEditor({
 
               {draft.sources.length === 0 ? (
                 <p className="text-muted-foreground text-sm">
-                  No sources yet. Add a playlist, favourite, or paste a link.
+                  {rulesCoverIt
+                    ? 'Nothing here — the rules below supply the music.'
+                    : 'No sources yet. Add a playlist, favourite, or paste a link — or let a rule below play something.'}
                 </p>
               ) : (
                 <ul className="flex flex-col gap-1">

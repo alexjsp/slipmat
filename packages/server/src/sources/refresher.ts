@@ -1,3 +1,4 @@
+import { sourcesFromRules } from '@slipmat/shared'
 import type { Logger } from '../logger.js'
 import type { PresetRepository } from '../presets/repository.js'
 import type { SourceCache } from './cache.js'
@@ -92,17 +93,10 @@ export class SourceRefresher {
         add({ kind: source.kind, ref: source.ref, label: source.label })
       }
       // Rules can introduce sources the base preset never mentions — a
-      // Christmas playlist has to be current in December too.
-      for (const rule of this.deps.repo.rulesFor(preset.id)) {
-        for (const source of [
-          ...(rule.effect.addSources ?? []),
-          ...(rule.effect.replaceSources ?? []),
-          // Every arm of a rotation, not just today's: tomorrow's is due to
-          // play in a few hours and should not be resolved cold.
-          ...(rule.effect.rotateSources?.sources ?? []),
-        ]) {
-          add(source)
-        }
+      // Christmas playlist has to be current in December too, and every arm of
+      // a rotation, not just today's, since tomorrow's is hours away.
+      for (const source of sourcesFromRules(this.deps.repo.rulesFor(preset.id))) {
+        add(source)
       }
     }
 

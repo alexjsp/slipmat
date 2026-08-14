@@ -74,6 +74,63 @@ export const presetRuleInputSchema = z.object({
 })
 export type PresetRuleInput = z.infer<typeof presetRuleInputSchema>
 
+/**
+ * Every source these rules could ever contribute, in order, without repeats.
+ *
+ * One list for the three jobs that need it: warming the cache, keeping resolved
+ * sources fresh, and showing what a preset plays when the rules are all it has.
+ */
+export function sourcesFromRules(rules: Array<{ effect: RuleEffect }>): RuleSource[] {
+  const seen = new Set<string>()
+  const sources: RuleSource[] = []
+  for (const { effect } of rules) {
+    for (const source of [
+      ...(effect.addSources ?? []),
+      ...(effect.replaceSources ?? []),
+      ...(effect.rotateSources?.sources ?? []),
+    ]) {
+      const key = `${source.kind}:${source.ref}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      sources.push({ kind: source.kind, ref: source.ref, label: source.label })
+    }
+  }
+  return sources
+}
+
+/** No clause to fail, so this rule applies whatever the date. */
+export function isUnconditional(condition: RuleCondition): boolean {
+  // Empty arrays mean "any", the same as absent — that is how the matcher
+  // reads them, and disagreeing here would promise music that never arrives.
+  return (
+    !condition.daysOfWeek?.length &&
+    !condition.months?.length &&
+    !condition.dateRange &&
+    !condition.timeOfDay
+  )
+}
+
+/**
+ * Will these rules put something in the queue on every day of the year?
+ *
+ * What lets a preset have no sources of its own: "rotate through these three
+ * playlists" is a complete instruction, and demanding a base source as well
+ * meant one of the three had to play every day.
+ */
+export function rulesGuaranteeASource(
+  rules: Array<{ enabled: boolean; condition: RuleCondition; effect: RuleEffect }>,
+): boolean {
+  // An empty replace is "play nothing", and it can appear behind any condition,
+  // so nothing downstream of it is guaranteed.
+  if (rules.some((rule) => rule.enabled && rule.effect.replaceSources?.length === 0)) return false
+
+  return rules.some((rule) => {
+    if (!rule.enabled || !isUnconditional(rule.condition)) return false
+    const { addSources, replaceSources, rotateSources } = rule.effect
+    return !!(addSources?.length || replaceSources?.length || rotateSources?.sources.length)
+  })
+}
+
 /** What a preset would actually do, once rules have been applied. */
 export const effectivePresetSchema = z.object({
   sources: z.array(ruleSourceSchema),
