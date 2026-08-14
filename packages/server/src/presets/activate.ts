@@ -5,7 +5,12 @@ import type { Db } from '../db/index.js'
 import { activations } from '../db/schema.js'
 import type { Logger } from '../logger.js'
 import type { DriverPlayMode, SonosDriver } from '../sonos/driver.js'
-import { classifyPlaybackKind, isProtectedFromPauseAll, trackIdentity } from '../sonos/uris.js'
+import {
+  classifyPlaybackKind,
+  isOwnQueueUri,
+  isProtectedFromPauseAll,
+  trackIdentity,
+} from '../sonos/uris.js'
 import type { SourceCache } from '../sources/cache.js'
 import type { ResolvedTrack, ResolveOptions } from '../sources/resolver.js'
 import type { SystemStateStore } from '../state/store.js'
@@ -64,6 +69,25 @@ const QUEUE_COMMAND_GAP_MS = 5000
  */
 const MAX_BLOCKED_SKIPS = 8
 
+/**
+ * How many unrecognised tracks in a row mean the queue is no longer ours.
+ *
+ * Adding a song from the Sonos app leaves the preset's queue exactly where it
+ * was with one extra track in it, and shuffle will land on that track sooner or
+ * later. Retiring on the first one we don't recognise is what took the Morning
+ * preset's switch off at 6am on a queue that played all day: a single hand-
+ * queued track, one reconcile while it played, and the activation was gone for
+ * good.
+ *
+ * Three *distinct* tracks in a row, so a handful of additions is ridiculous
+ * odds against, while a queue someone genuinely replaced is retired within a
+ * few minutes of music.
+ */
+const FOREIGN_TRACK_LIMIT = 3
+
+/** One row of the activations table, as read back. */
+type ActivationRow = typeof activations.$inferSelect
+
 export type ActivationDeps = {
   db: Db
   driver: SonosDriver
@@ -97,6 +121,12 @@ export class ActivationEngine {
    * with a single room in it.
    */
   private readonly inFlight = new Map<string, Promise<ActivationResult>>()
+  /**
+   * Tracks we did not queue, seen playing out of an activation's queue, by
+   * activation. In memory rather than in the database: a restart's worth of
+   * doubt is not worth persisting, and reconcile rebuilds it within a track.
+   */
+  private readonly unrecognised = new Map<string, Set<string>>()
   constructor(private readonly deps: ActivationDeps) {
     this.logger = deps.logger.child({ component: 'activation' })
   }
@@ -472,30 +502,49 @@ export class ActivationEngine {
     // Pause only: the group, volumes and queue stay as they are, so playback
     // can be resumed from the Sonos app.
     await this.deps.driver.pause(activation.coordinatorZoneId).catch(() => undefined)
-    this.markStopped(activation.id)
+    this.markStopped(activation, 'stopped by request')
     this.deps.store.refresh()
     return true
   }
 
   /**
-   * The "loose" active-state test: the coordinator is still playing something
-   * we queued. Survives skips, a speaker joining or leaving, and a wind-down to
-   * fewer rooms; goes false on pause, stop, or the queue being replaced.
+   * The "loose" active-state test: the coordinator is still playing our queue.
+   * Survives skips, tracks someone queued by hand, a speaker joining or
+   * leaving, and a wind-down to fewer rooms; goes false on pause, stop, or the
+   * queue being handed to something else.
    */
   isStillPlaying(presetId: string): boolean {
     const activation = this.liveActivation(presetId)
     if (!activation) return false
+    return this.liveness(activation).state !== 'gone'
+  }
 
+  /**
+   * What the speakers say about one activation, in the terms reconcile needs.
+   *
+   * `unrecognised` is the interesting one: the group is still playing the queue
+   * we built, but on a track that was not in it. One of those is somebody
+   * adding a song from the Sonos app and means nothing; a run of them means the
+   * queue is no longer the preset's.
+   */
+  private liveness(
+    activation: ActivationRow,
+  ):
+    | { state: 'playing' }
+    | { state: 'unrecognised'; identity: string }
+    | { state: 'gone'; reason: string } {
     const snapshot = this.deps.driver.snapshot()
     const group = snapshot.groups.find(
       (candidate) => candidate.coordinatorZoneId === activation.coordinatorZoneId,
     )
+    if (!group) return { state: 'gone', reason: 'the coordinator no longer leads a group' }
+
     // TRANSITIONING counts as playing. Sonos passes through it between every
     // pair of tracks, and for minutes on end while a large preset's tail is
     // still being appended — treating it as stopped makes a preset flicker off
     // at every track change and stay off through the whole append.
-    if (group?.transportState !== 'PLAYING' && group?.transportState !== 'TRANSITIONING') {
-      return false
+    if (group.transportState !== 'PLAYING' && group.transportState !== 'TRANSITIONING') {
+      return { state: 'gone', reason: `the coordinator is ${group.transportState}` }
     }
 
     // Deliberately no check that every zone the preset asked for is still in
@@ -506,7 +555,19 @@ export class ActivationEngine {
     // activation whose music was playing all night — taking the wind-down, the
     // sleep timer and the HomeKit switch with it.
 
-    if (activation.streamUri) return group.transportUri === activation.streamUri
+    if (activation.streamUri) {
+      return group.transportUri === activation.streamUri
+        ? { state: 'playing' }
+        : { state: 'gone', reason: 'the group is playing something other than our stream' }
+    }
+
+    // The queue itself is what identifies the activation now, not whichever
+    // track happens to be playing out of it. A group pointed at its own queue
+    // is playing the queue we filled — Sonos has no way to swap the contents
+    // wholesale without going through us or through a transport change.
+    if (!isOwnQueueUri(group.transportUri, activation.coordinatorZoneId)) {
+      return { state: 'gone', reason: 'the group is no longer playing its own queue' }
+    }
 
     // Compared by item identity, not by URI: Sonos swaps the scheme once it has
     // resolved a track against its service, so what comes back out of the queue
@@ -517,7 +578,10 @@ export class ActivationEngine {
         .filter((identity): identity is string => identity !== null),
     )
     const playing = trackIdentity(group.currentTrackUri)
-    return !!playing && queued.has(playing)
+    // No readable track is not evidence of anything: events arrive with the URI
+    // missing while a track is being loaded, and the queue is still ours.
+    if (!playing) return { state: 'playing' }
+    return queued.has(playing) ? { state: 'playing' } : { state: 'unrecognised', identity: playing }
   }
 
   /** Drop activations whose reality no longer matches, so switches go off. */
@@ -531,7 +595,28 @@ export class ActivationEngine {
       // milliseconds of being created, and no later event ever revives it.
       const age = now - new Date(activation.startedAt).getTime()
       if (age < SETTLE_GRACE_MS) continue
-      if (!this.isStillPlaying(activation.presetId)) this.markStopped(activation.id)
+
+      const verdict = this.liveness(activation)
+      if (verdict.state === 'gone') {
+        this.markStopped(activation, verdict.reason)
+        continue
+      }
+      if (verdict.state === 'playing') {
+        // One of ours again: whatever was playing before was a guest, not a
+        // sign that the queue had moved on.
+        this.unrecognised.delete(activation.id)
+        continue
+      }
+
+      // Counted by identity rather than by sighting, because reconcile runs on
+      // every state change — volume, grouping, position — and a single track
+      // would otherwise reach any limit within seconds of starting.
+      const seen = this.unrecognised.get(activation.id) ?? new Set<string>()
+      seen.add(verdict.identity)
+      this.unrecognised.set(activation.id, seen)
+      if (seen.size >= FOREIGN_TRACK_LIMIT) {
+        this.markStopped(activation, `${seen.size} tracks in a row that this preset did not queue`)
+      }
     }
   }
 
@@ -1031,23 +1116,38 @@ export class ActivationEngine {
       .run()
   }
 
-  private markStopped(activationId: string) {
+  /**
+   * Retire an activation, and say why.
+   *
+   * The reason is logged and the moment stamped because this used to happen in
+   * silence: an activation that went inactive left no row change you could date
+   * and no line in the log, so "the preset says off and the music is playing"
+   * was a question the server held all the evidence for and none of the answer.
+   */
+  private markStopped(activation: { id: string; presetId: string }, reason: string) {
     this.deps.db
       .update(activations)
-      .set({ live: false })
-      .where(eq(activations.id, activationId))
+      .set({ live: false, stoppedAt: this.now().toISOString() })
+      .where(eq(activations.id, activation.id))
       .run()
+    this.unrecognised.delete(activation.id)
+    this.logger.info(
+      { activationId: activation.id, presetId: activation.presetId, reason },
+      'retired activation',
+    )
   }
 
   private invalidateOverlapping(zoneIds: string[], exceptPresetId: string) {
     const mine = new Set(zoneIds)
     for (const activation of this.liveActivations()) {
       if (activation.presetId === exceptPresetId) {
-        this.markStopped(activation.id)
+        this.markStopped(activation, 'superseded by a new activation of the same preset')
         continue
       }
       const members = JSON.parse(activation.memberZoneIdsJson) as string[]
-      if (members.some((zoneId) => mine.has(zoneId))) this.markStopped(activation.id)
+      if (members.some((zoneId) => mine.has(zoneId))) {
+        this.markStopped(activation, 'its rooms were taken by another preset')
+      }
     }
   }
 }

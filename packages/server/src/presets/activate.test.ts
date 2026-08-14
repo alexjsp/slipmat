@@ -5,6 +5,7 @@ import { activations } from '../db/schema.js'
 import { createLogger } from '../logger.js'
 import type { DriverBrowseItem } from '../sonos/driver.js'
 import { FakeSonosDriver } from '../sonos/fake-driver.js'
+import { queueUriFor } from '../sonos/uris.js'
 import { SourceCache } from '../sources/cache.js'
 import { SourceResolver } from '../sources/resolver.js'
 import { SystemStateStore } from '../state/store.js'
@@ -80,7 +81,6 @@ describe('ActivationEngine', () => {
   let db: ReturnType<typeof openDatabase>
   let store: SystemStateStore
   let cache: SourceCache
-
   beforeEach(async () => {
     driver = new FakeSonosDriver({ tvZoneIds: [LIVING] })
     await driver.start()
@@ -102,6 +102,11 @@ describe('ActivationEngine', () => {
       logger,
       repo,
       timeZone: 'UTC',
+      // Pinned, because the random opening track decides whether the fake has
+      // any metadata for what is playing by the time the prune runs — which
+      // decides whether a duplicate of the playing song is protected. Left to
+      // Math.random, tests that touch deduplication pass about half the time.
+      random: () => 0,
       // Real life spaces these out; the tests would only be waiting.
       queueGapMs: 0,
       skipSettleMs: 0,
@@ -262,10 +267,13 @@ describe('ActivationEngine', () => {
     // Apple Music gives the same recording a different library id per playlist,
     // so the URIs differ and deduplication by URI alone saw nothing — a queue of
     // 125 tracks had six repeated titles and removed none of them.
+    // The pair to deduplicate sits behind the opening track, because the song
+    // that is playing is deliberately never pruned — starting on one Eclipse
+    // would protect the other, which is a different rule being tested below.
     driver.setBrowseResult('SQ:1', [
+      { ...track('lib-c'), title: 'Poison', artist: 'Alice Cooper' },
       { ...track('lib-a'), title: 'Eclipse', artist: 'Delta Goodrem' },
       { ...track('lib-b'), title: 'Eclipse', artist: 'Delta Goodrem' },
-      { ...track('lib-c'), title: 'Poison', artist: 'Alice Cooper' },
       { ...track('lib-d'), title: 'Poison', artist: 'Rita Ora' },
     ])
 
@@ -1001,6 +1009,26 @@ describe('ActivationEngine', () => {
   })
 
   describe('active-state detection', () => {
+    /**
+     * The same household and database, an engine a minute further on, so
+     * reconcile is past the settle grace and will actually act.
+     *
+     * One engine per test rather than a shared adjusted clock: what an engine
+     * has seen between reconciles is part of what it decides, so the run of
+     * unrecognised tracks has to accumulate on a single instance.
+     */
+    const engineWithAnUnhurriedClock = () =>
+      new ActivationEngine({
+        db,
+        driver,
+        store,
+        cache,
+        logger,
+        repo,
+        timeZone: 'UTC',
+        now: () => new Date(Date.now() + 60_000),
+      })
+
     it('reports active while our queue is playing on the right speakers', async () => {
       const preset = create()
       await engine.activate(preset)
@@ -1034,20 +1062,23 @@ describe('ActivationEngine', () => {
       await engine.activate(preset)
       await driver.pause(KITCHEN)
 
-      // Same engine, an unhurried clock.
-      const later = new ActivationEngine({
-        db,
-        driver,
-        store,
-        cache,
-        logger,
-        repo,
-        timeZone: 'UTC',
-        now: () => new Date(Date.now() + 60_000),
-      })
+      const later = engineWithAnUnhurriedClock()
       later.reconcile()
 
       expect(later.liveActivation(preset.id)).toBeUndefined()
+    })
+
+    it('dates the retirement, so an activation that went off can be placed', async () => {
+      // This used to happen in silence: no log line, and nothing on the row to
+      // date it by, so "the switch is off and the music is playing" left the
+      // server holding all the evidence and none of the answer.
+      const preset = create()
+      const { activationId } = await engine.activate(preset)
+      await engine.stop(preset.id)
+
+      const row = db.select().from(activations).all().at(0)
+      expect(row?.id).toBe(activationId)
+      expect(row?.stoppedAt).toEqual(expect.any(String))
     })
 
     it('survives a skip to another track we queued', async () => {
@@ -1064,11 +1095,89 @@ describe('ActivationEngine', () => {
       expect(engine.isStillPlaying(preset.id)).toBe(false)
     })
 
-    it('goes inactive when someone replaces the queue', async () => {
+    it('goes inactive when the group is given something other than its queue', async () => {
       const preset = create()
       await engine.activate(preset)
-      driver.setPlaying(KITCHEN, 'x-rincon-queue:k#0', 'something-else-entirely')
+      driver.setPlaying(KITCHEN, 'x-sonosapi-stream:s24940?sid=254', 'radio-4')
       expect(engine.isStillPlaying(preset.id)).toBe(false)
+    })
+
+    it('stays active when someone adds a track of their own to the queue', async () => {
+      // The reason the queue, rather than the current track, is what identifies
+      // an activation: one song added from the Sonos app used to retire the
+      // preset the moment reconcile saw it playing, and nothing ever revived
+      // one — so the switch read off over a queue that played all day.
+      const preset = create()
+      await engine.activate(preset)
+      await settle()
+      driver.setPlaying(KITCHEN, queueUriFor(KITCHEN), 'a-song-someone-added')
+
+      const later = engineWithAnUnhurriedClock()
+      later.reconcile()
+
+      expect(later.liveActivation(preset.id)).toBeDefined()
+      expect(later.isStillPlaying(preset.id)).toBe(true)
+    })
+
+    it('counts tracks, not sightings, so one stranger cannot retire it', async () => {
+      const preset = create()
+      await engine.activate(preset)
+      await settle()
+      driver.setPlaying(KITCHEN, queueUriFor(KITCHEN), 'a-song-someone-added')
+
+      // Reconcile runs on every state change — volume, grouping, position — so
+      // a single track is seen over and over while it plays.
+      const later = engineWithAnUnhurriedClock()
+      for (let index = 0; index < 10; index += 1) later.reconcile()
+
+      expect(later.liveActivation(preset.id)).toBeDefined()
+    })
+
+    it('retires it after a run of tracks it never queued', async () => {
+      const preset = create()
+      await engine.activate(preset)
+      await settle()
+
+      // A queue that has genuinely been handed to something else: every track
+      // coming out of it is a stranger.
+      const later = engineWithAnUnhurriedClock()
+      for (const uri of ['stranger-1', 'stranger-2', 'stranger-3']) {
+        driver.setPlaying(KITCHEN, queueUriFor(KITCHEN), uri)
+        later.reconcile()
+      }
+
+      expect(later.liveActivation(preset.id)).toBeUndefined()
+    })
+
+    it('forgets the strangers once one of ours comes back', async () => {
+      const preset = create()
+      await engine.activate(preset)
+      await settle()
+      const later = engineWithAnUnhurriedClock()
+
+      driver.setPlaying(KITCHEN, queueUriFor(KITCHEN), 'stranger-1')
+      later.reconcile()
+      driver.setPlaying(KITCHEN, queueUriFor(KITCHEN), 'stranger-2')
+      later.reconcile()
+      // Shuffle comes back round to the preset's own music.
+      driver.setPlaying(KITCHEN, queueUriFor(KITCHEN), 'jazz-2')
+      later.reconcile()
+      driver.setPlaying(KITCHEN, queueUriFor(KITCHEN), 'stranger-3')
+      later.reconcile()
+
+      expect(later.liveActivation(preset.id)).toBeDefined()
+    })
+
+    it('holds on while a track is loading and no URI has arrived yet', async () => {
+      const preset = create()
+      await engine.activate(preset)
+      await settle()
+      driver.setPlaying(KITCHEN, queueUriFor(KITCHEN), '')
+
+      const later = engineWithAnUnhurriedClock()
+      later.reconcile()
+
+      expect(later.liveActivation(preset.id)).toBeDefined()
     })
 
     it('stays active when a speaker leaves, because the music has not stopped', async () => {

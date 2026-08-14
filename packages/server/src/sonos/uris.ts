@@ -111,6 +111,17 @@ export function queueUriFor(coordinatorUuid: string): string {
   return `${QUEUE_PREFIX}${coordinatorUuid}#0`
 }
 
+/**
+ * Is this group playing the queue belonging to this coordinator?
+ *
+ * Matched by prefix rather than against `queueUriFor` exactly: the fragment is
+ * a position into the queue, and reading it as part of the identity would make
+ * "still playing our queue" false the moment Sonos wrote anything but `#0`.
+ */
+export function isOwnQueueUri(uri: string | undefined | null, coordinatorUuid: string): boolean {
+  return !!uri && uri.startsWith(`${QUEUE_PREFIX}${coordinatorUuid}`)
+}
+
 /** The URI that makes a device follow another coordinator. */
 export function followUriFor(coordinatorUuid: string): string {
   return `${FOLLOWER_PREFIX}${coordinatorUuid}`

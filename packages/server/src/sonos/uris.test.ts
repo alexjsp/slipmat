@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { formatDuration, parseDuration } from './time.js'
 import {
   classifyPlaybackKind,
+  isOwnQueueUri,
   isProtectedFromPauseAll,
   isRadioStream,
   queueUriFor,
@@ -67,6 +68,22 @@ describe('isRadioStream', () => {
 describe('queueUriFor', () => {
   it('builds the coordinator queue uri', () => {
     expect(queueUriFor('RINCON_ABC01400')).toBe('x-rincon-queue:RINCON_ABC01400#0')
+  })
+})
+
+describe('isOwnQueueUri', () => {
+  it('recognises a group playing its own queue', () => {
+    expect(isOwnQueueUri('x-rincon-queue:RINCON_ABC01400#0', 'RINCON_ABC01400')).toBe(true)
+  })
+
+  it('ignores the position, which is not part of the identity', () => {
+    expect(isOwnQueueUri('x-rincon-queue:RINCON_ABC01400#17', 'RINCON_ABC01400')).toBe(true)
+  })
+
+  it('rejects another coordinator queue, a stream, and nothing at all', () => {
+    expect(isOwnQueueUri('x-rincon-queue:RINCON_XYZ01400#0', 'RINCON_ABC01400')).toBe(false)
+    expect(isOwnQueueUri('x-sonosapi-stream:s24940?sid=254', 'RINCON_ABC01400')).toBe(false)
+    expect(isOwnQueueUri(null, 'RINCON_ABC01400')).toBe(false)
   })
 })
 

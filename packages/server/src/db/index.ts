@@ -91,6 +91,9 @@ const DDL = [
   // Stamped once the group has been shrunk, so a tick-based check cannot do it
   // twice — and so it survives a restart, which a setTimeout would not.
   `ALTER TABLE activations ADD COLUMN shrunk_at TEXT`,
+  // Stamped when the activation is retired. Without it a preset that went
+  // inactive left nothing behind to date the moment by.
+  `ALTER TABLE activations ADD COLUMN stopped_at TEXT`,
 
   `CREATE TABLE IF NOT EXISTS preset_triggers (
     id TEXT PRIMARY KEY,

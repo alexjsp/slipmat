@@ -97,6 +97,8 @@ export const activations = sqliteTable(
     warningsJson: text('warnings_json').notNull().default('[]'),
     /** Cleared when the activation stops or is superseded. */
     live: integer('live', { mode: 'boolean' }).notNull().default(true),
+    /** When `live` was cleared, so a retirement can be dated after the fact. */
+    stoppedAt: text('stopped_at'),
     shrunkAt: text('shrunk_at'),
     startedAt: text('started_at').notNull().default(now),
   },
