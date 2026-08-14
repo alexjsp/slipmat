@@ -54,7 +54,10 @@ export function App() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-2xl flex-col">
       <header className="flex items-center justify-between gap-4 px-4 pt-4">
-        <h1 className="font-semibold text-xl tracking-tight">Slipmat</h1>
+        <h1 className="flex items-center gap-2 font-semibold text-xl tracking-tight">
+          <img src="/slipmat.svg" alt="" className="size-6 shrink-0" />
+          Slipmat
+        </h1>
         <div className="flex items-center gap-3">
           {/* Working is the normal case and needs no announcing; only a problem
               is worth the user's attention. */}
