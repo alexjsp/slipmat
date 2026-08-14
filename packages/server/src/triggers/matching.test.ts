@@ -10,12 +10,19 @@ import {
 } from './matching.js'
 
 const clock = (
-  overrides: Partial<{ dayOfWeek: number; month: number; day: number; minutes: number }> = {},
+  overrides: Partial<{
+    dayOfWeek: number
+    month: number
+    day: number
+    minutes: number
+    epochDay: number
+  }> = {},
 ) => ({
   dayOfWeek: 1,
   month: 6,
   day: 15,
   minutes: 7 * 60 + 30,
+  epochDay: 20_619,
   ...overrides,
 })
 

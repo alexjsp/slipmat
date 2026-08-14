@@ -1,6 +1,6 @@
 import type { EffectivePreset, PresetRule, PresetRuleInput } from '@slipmat/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { SourcePicker } from '@/components/source-picker'
 import { Button } from '@/components/ui/button'
@@ -48,9 +48,10 @@ export function RuleEditor({
   /** Absent while the preset is still being created; enables the preview. */
   presetId?: string | undefined
 }) {
-  const [pickerFor, setPickerFor] = useState<{ index: number; mode: 'add' | 'replace' } | null>(
-    null,
-  )
+  const [pickerFor, setPickerFor] = useState<{
+    index: number
+    mode: 'add' | 'replace' | 'rotate'
+  } | null>(null)
 
   // Only the preview is fetched here. The rules themselves belong to the form
   // above, so they are saved with everything else rather than on their own.
@@ -262,18 +263,102 @@ export function RuleEditor({
               >
                 Play only…
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setPickerFor({ index, mode: 'rotate' })}
+              >
+                Rotate through…
+              </Button>
             </div>
 
-            {(rule.effect.addSources ?? []).map((source) => (
-              <p key={source.ref} className="text-muted-foreground text-xs">
-                + {source.label}
-              </p>
-            ))}
-            {(rule.effect.replaceSources ?? []).map((source) => (
-              <p key={source.ref} className="text-muted-foreground text-xs">
-                only {source.label}
-              </p>
-            ))}
+            {(['addSources', 'replaceSources'] as const).map((key) =>
+              (rule.effect[key] ?? []).map((source, sourceIndex) => (
+                <p
+                  key={`${key}-${source.ref}`}
+                  className="flex items-center gap-2 text-muted-foreground text-xs"
+                >
+                  {key === 'addSources' ? '+' : 'only'} {source.label}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${source.label}`}
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => {
+                      const remaining = (rule.effect[key] ?? []).filter((_, i) => i !== sourceIndex)
+                      patch(index, {
+                        effect: {
+                          ...rule.effect,
+                          // Empty means "no clause", not "play nothing": an
+                          // empty replaceSources would silently wipe the
+                          // preset's own sources.
+                          [key]: remaining.length ? remaining : undefined,
+                        },
+                      })
+                    }}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </p>
+              )),
+            )}
+
+            {rule.effect.rotateSources && (
+              <div className="flex flex-col gap-2">
+                {rule.effect.rotateSources.sources.map((source, sourceIndex) => (
+                  <p
+                    key={source.ref}
+                    className="flex items-center gap-2 text-muted-foreground text-xs"
+                  >
+                    <span className="tabular-nums">{sourceIndex + 1}.</span>
+                    {source.label}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${source.label} from the rotation`}
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => {
+                        const rotation = rule.effect.rotateSources
+                        if (!rotation) return
+                        const sources = rotation.sources.filter((_, i) => i !== sourceIndex)
+                        patch(index, {
+                          effect: {
+                            ...rule.effect,
+                            // An empty rotation is not a rotation; drop it
+                            // rather than saving something that does nothing.
+                            rotateSources: sources.length ? { ...rotation, sources } : undefined,
+                          },
+                        })
+                      }}
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </p>
+                ))}
+                <div className="flex items-center gap-1">
+                  <span className="text-muted-foreground text-xs">rotating, one per</span>
+                  {(['day', 'week'] as const).map((period) => (
+                    <button
+                      key={period}
+                      type="button"
+                      onClick={() => {
+                        const rotation = rule.effect.rotateSources
+                        if (!rotation) return
+                        patch(index, {
+                          effect: { ...rule.effect, rotateSources: { ...rotation, period } },
+                        })
+                      }}
+                      className={cn(
+                        'rounded px-2 py-1 text-xs',
+                        rule.effect.rotateSources?.period === period
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-secondary',
+                      )}
+                    >
+                      {period}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-2">
               <Label htmlFor={`vol-${index}`} className="text-xs">
@@ -308,6 +393,17 @@ export function RuleEditor({
           if (!pickerFor) return
           const rule = draft[pickerFor.index]
           if (!rule) return
+          if (pickerFor.mode === 'rotate') {
+            const rotation = rule.effect.rotateSources ?? { sources: [], period: 'day' as const }
+            patch(pickerFor.index, {
+              effect: {
+                ...rule.effect,
+                rotateSources: { ...rotation, sources: [...rotation.sources, source] },
+              },
+            })
+            setPickerFor(null)
+            return
+          }
           const key = pickerFor.mode === 'add' ? 'addSources' : 'replaceSources'
           patch(pickerFor.index, {
             effect: { ...rule.effect, [key]: [...(rule.effect[key] ?? []), source] },

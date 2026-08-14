@@ -97,6 +97,9 @@ export class SourceRefresher {
         for (const source of [
           ...(rule.effect.addSources ?? []),
           ...(rule.effect.replaceSources ?? []),
+          // Every arm of a rotation, not just today's: tomorrow's is due to
+          // play in a few hours and should not be resolved cold.
+          ...(rule.effect.rotateSources?.sources ?? []),
         ]) {
           add(source)
         }

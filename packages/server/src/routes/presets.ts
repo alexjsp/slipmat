@@ -189,6 +189,7 @@ export async function registerPresetRoutes(
         for (const source of [
           ...(rule.effect.addSources ?? []),
           ...(rule.effect.replaceSources ?? []),
+          ...(rule.effect.rotateSources?.sources ?? []),
         ]) {
           await cache.get(source).catch(() => undefined)
         }

@@ -1,12 +1,13 @@
-import type { Preset, PresetRule } from '@slipmat/shared'
+import type { Preset, PresetRule, Rotation } from '@slipmat/shared'
 import { describe, expect, it } from 'vitest'
-import { type Clock, clockFrom, conditionMatches, evaluateRules } from './rules.js'
+import { type Clock, clockFrom, conditionMatches, evaluateRules, rotationPick } from './rules.js'
 
 const clock = (overrides: Partial<Clock> = {}): Clock => ({
   dayOfWeek: 1,
   month: 6,
   day: 15,
   minutes: 12 * 60,
+  epochDay: 20_619,
   ...overrides,
 })
 
@@ -264,6 +265,74 @@ describe('evaluateRules', () => {
   })
 })
 
+describe('rotations', () => {
+  const christmas = {
+    period: 'day' as const,
+    sources: [
+      { kind: 'sonos_playlist' as const, ref: 'SQ:great', label: 'Great Christmas' },
+      { kind: 'sonos_playlist' as const, ref: 'SQ:essential', label: 'Essential Christmas' },
+      { kind: 'sonos_playlist' as const, ref: 'SQ:fun', label: 'Fun Christmas' },
+    ],
+  }
+
+  const picks = (rotation: Rotation, from: number, count: number) =>
+    Array.from(
+      { length: count },
+      (_, offset) => rotationPick(rotation, clock({ epochDay: from + offset }))?.ref,
+    )
+
+  it('takes the next playlist each day and comes back round', () => {
+    expect(picks(christmas, 20_000, 7)).toEqual([
+      'SQ:fun',
+      'SQ:great',
+      'SQ:essential',
+      'SQ:fun',
+      'SQ:great',
+      'SQ:essential',
+      'SQ:fun',
+    ])
+  })
+
+  it('keeps stepping across a month boundary', () => {
+    // The shell script this replaces used day-of-month % 3, which repeated
+    // itself whenever a 31-day month rolled over.
+    const dec31 = Math.floor(Date.UTC(2026, 11, 31) / 86_400_000)
+    const [thirtyFirst, first] = picks(christmas, dec31, 2)
+    expect(thirtyFirst).not.toBe(first)
+  })
+
+  it('holds a weekly rotation steady until Monday', () => {
+    const monday = Math.floor(Date.UTC(2026, 5, 15) / 86_400_000)
+    const weekly = { ...christmas, period: 'week' as const }
+    expect(picks(weekly, monday, 7)).toEqual(Array(7).fill('SQ:great'))
+    expect(picks(weekly, monday + 7, 1)).toEqual(['SQ:essential'])
+  })
+
+  it("appends today's pick to whatever the preset already plays", () => {
+    const result = evaluateRules(
+      basePreset,
+      [rule({ label: 'Christmas', effect: { rotateSources: christmas } })],
+      clock({ epochDay: 20_001 }),
+    )
+    expect(result.sources.map((s) => s.ref)).toEqual(['SQ:1', 'SQ:great'])
+    expect(result.appliedRuleLabels).toEqual(['Christmas'])
+  })
+
+  it('rotates over what a replace left behind, not over the base preset', () => {
+    const result = evaluateRules(
+      basePreset,
+      [
+        rule({
+          label: 'Christmas',
+          effect: { replaceSources: [], rotateSources: christmas },
+        }),
+      ],
+      clock({ epochDay: 20_002 }),
+    )
+    expect(result.sources.map((s) => s.ref)).toEqual(['SQ:essential'])
+  })
+})
+
 describe('clockFrom', () => {
   it('reads wall-clock fields in the configured timezone, not the host one', () => {
     // 23:30 UTC on a Thursday is 00:30 Friday in Europe/London (BST).
@@ -276,6 +345,15 @@ describe('clockFrom', () => {
     const utc = clockFrom(instant, 'UTC')
     expect(utc.dayOfWeek).toBe(4)
     expect(utc.minutes).toBe(23 * 60 + 30)
+  })
+
+  it('counts the epoch day from the local date, not the UTC one', () => {
+    // 00:30 Friday in London is still Thursday in UTC; a rotation should have
+    // moved on for the household, whatever the server's clock says.
+    const instant = new Date('2026-06-18T23:30:00Z')
+    const london = clockFrom(instant, 'Europe/London')
+    expect(london.epochDay).toBe(clockFrom(instant, 'UTC').epochDay + 1)
+    expect(london.epochDay).toBe(Math.floor(Date.UTC(2026, 5, 19) / 86_400_000))
   })
 
   it('reports midnight as 0 minutes, not 1440', () => {

@@ -1,4 +1,11 @@
-import type { EffectivePreset, Preset, PresetRule, RuleCondition } from '@slipmat/shared'
+import type {
+  EffectivePreset,
+  Preset,
+  PresetRule,
+  Rotation,
+  RuleCondition,
+  RuleSource,
+} from '@slipmat/shared'
 
 /**
  * Rule evaluation is a pure function of (preset, rules, now).
@@ -19,6 +26,13 @@ export type Clock = {
   day: number
   /** Minutes since local midnight. */
   minutes: number
+  /**
+   * Whole local days since 1970-01-01.
+   *
+   * The counter rotations advance on. Month length would make `day` alone
+   * stutter — the 31st and the 1st are the same pick in a three-way rotation.
+   */
+  epochDay: number
 }
 
 export function clockFrom(now: Date, timeZone: string): Clock {
@@ -26,6 +40,7 @@ export function clockFrom(now: Date, timeZone: string): Clock {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone,
     weekday: 'short',
+    year: 'numeric',
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -47,11 +62,18 @@ export function clockFrom(now: Date, timeZone: string): Clock {
   // 24-hour formatting yields "24" for midnight in some ICU versions.
   const hour = Number(get('hour')) % 24
 
+  const year = Number(get('year'))
+  const month = Number(get('month'))
+  const day = Number(get('day'))
+
   return {
     dayOfWeek: weekdays[get('weekday')] ?? 0,
-    month: Number(get('month')),
-    day: Number(get('day')),
+    month,
+    day,
     minutes: hour * 60 + Number(get('minute')),
+    // Counted through UTC purely as calendar arithmetic: these are the local
+    // date's fields, so the result is a local day number, not a UTC one.
+    epochDay: Math.floor(Date.UTC(year, month - 1, day) / 86_400_000),
   }
 }
 
@@ -99,6 +121,21 @@ export function conditionMatches(condition: RuleCondition, clock: Clock): boolea
 const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)))
 
 /**
+ * Which entry of a rotation today lands on.
+ *
+ * Epoch day 0 was a Thursday, so weekly rotations are shifted by three to turn
+ * over on a Monday — a week that starts mid-week reads as a bug to whoever set
+ * it up.
+ */
+export function rotationPick(rotation: Rotation, clock: Clock): RuleSource | undefined {
+  const step = rotation.period === 'week' ? Math.floor((clock.epochDay + 3) / 7) : clock.epochDay
+  const count = rotation.sources.length
+  if (count === 0) return undefined
+  // Modulo of a negative epoch day (pre-1970) would otherwise index nothing.
+  return rotation.sources[((step % count) + count) % count]
+}
+
+/**
  * Apply every matching rule, in order, to a working copy of the preset.
  *
  * All matches apply rather than first-match-wins, so "December" and "Thursday"
@@ -137,6 +174,15 @@ export function evaluateRules(preset: Preset, rules: PresetRule[], clock: Clock)
     }
     if (effect.addSources) {
       effective.sources = [...effective.sources, ...effect.addSources]
+    }
+    if (effect.rotateSources) {
+      const pick = rotationPick(effect.rotateSources, clock)
+      if (pick) {
+        effective.sources = [
+          ...effective.sources,
+          { kind: pick.kind, ref: pick.ref, label: pick.label },
+        ]
+      }
     }
     if (effect.volumeAbsolute !== undefined) {
       const absolute = effect.volumeAbsolute

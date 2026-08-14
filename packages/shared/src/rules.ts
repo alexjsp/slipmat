@@ -22,12 +22,27 @@ export const ruleSourceSchema = z.object({
   ref: z.string().min(1),
   label: z.string().min(1),
 })
+export type RuleSource = z.infer<typeof ruleSourceSchema>
+
+/**
+ * Take a different one of these each day (or week), in order, forever.
+ *
+ * The pick is a function of the date alone, so it is the same however many
+ * times the preset is fired today, and the editor's preview can be trusted.
+ */
+export const rotationSchema = z.object({
+  sources: z.array(ruleSourceSchema).min(1),
+  period: z.enum(['day', 'week']).default('day'),
+})
+export type Rotation = z.infer<typeof rotationSchema>
 
 export const ruleEffectSchema = z.object({
   /** Appended to whatever the preset has accumulated so far. */
   addSources: z.array(ruleSourceSchema).optional(),
   /** Discards everything accumulated so far. The deliberate override. */
   replaceSources: z.array(ruleSourceSchema).optional(),
+  /** Appends exactly one of its sources, chosen by today's date. */
+  rotateSources: rotationSchema.optional(),
   /** Applied to every zone in the preset, clamped to 0–100. */
   volumeDelta: z.number().int().min(-100).max(100).optional(),
   /** Wins over `volumeDelta` when both are set. */
