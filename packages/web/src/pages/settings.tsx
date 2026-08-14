@@ -1,11 +1,11 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy } from 'lucide-react'
 import { useState } from 'react'
 import { BlocklistEditor } from '@/components/blocklist-editor'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { getJson } from '@/lib/api'
+import { getJson, putJson } from '@/lib/api'
 import { useHomeKit } from '@/lib/use-homekit'
 
 export function SettingsPage() {
@@ -18,6 +18,8 @@ export function SettingsPage() {
   return (
     <div className="flex flex-col gap-4">
       <h2 className="font-semibold text-lg">Settings</h2>
+
+      <TimeZoneCard />
 
       <BlocklistEditor />
 
@@ -59,6 +61,60 @@ export function SettingsPage() {
         )}
       </Card>
     </div>
+  )
+}
+
+/**
+ * The one zone the whole household runs on.
+ *
+ * It has to be the server's, because that is where a 07:30 schedule fires long
+ * after every browser is closed — but the server is a container, and left to
+ * itself it thinks it is in UTC. So this offers the zone of the device you are
+ * reading it on, which is as close to "your time" as a shared server can get.
+ */
+function TimeZoneCard() {
+  const client = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+  const query = useQuery({
+    queryKey: ['timezone'],
+    queryFn: () => getJson<{ timeZone: string }>('/api/timezone'),
+  })
+
+  const deviceZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const serverZone = query.data?.timeZone
+
+  const save = async (timeZone: string) => {
+    setError(null)
+    try {
+      await putJson('/api/timezone', { timeZone })
+      // Schedules, rule previews and the "times are…" line all read this.
+      await client.invalidateQueries()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change the time zone')
+    }
+  }
+
+  return (
+    <Card className="gap-3 p-4">
+      <h3 className="font-medium text-sm">Time zone</h3>
+      {serverZone && (
+        <p className="text-muted-foreground text-sm">
+          Schedules and time-based rules are read in <strong>{serverZone}</strong>. It is{' '}
+          {new Date().toLocaleTimeString('en-GB', {
+            timeZone: serverZone,
+            hour: '2-digit',
+            minute: '2-digit',
+          })}{' '}
+          there now.
+        </p>
+      )}
+      {serverZone && serverZone !== deviceZone && (
+        <Button variant="outline" size="sm" className="self-start" onClick={() => save(deviceZone)}>
+          Use this device's ({deviceZone})
+        </Button>
+      )}
+      {error && <p className="text-destructive text-sm">{error}</p>}
+    </Card>
   )
 }
 

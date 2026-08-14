@@ -87,6 +87,9 @@ export async function buildServer({
   const cache = new SourceCache(db, resolver, logger)
   const repo = new PresetRepository(db)
   const settings = new SettingsStore(db)
+  // A function, not a value: the zone is a stored setting, and a scheduler that
+  // captured it at boot would keep firing on the old one until a restart.
+  const timeZone = () => settings.timeZone(config.timeZone)
   const engine = new ActivationEngine({
     db,
     driver,
@@ -94,7 +97,7 @@ export async function buildServer({
     cache,
     logger,
     repo,
-    timeZone: config.timeZone,
+    timeZone,
     settings,
   })
 
@@ -128,9 +131,9 @@ export async function buildServer({
     driver,
     cache,
     onPresetsChanged: () => homekit?.sync(),
-    timeZone: config.timeZone,
+    timeZone,
   })
-  await registerWebhookRoutes(app, { repo, engine, driver, store, settings })
+  await registerWebhookRoutes(app, { repo, engine, driver, store, settings, timeZone })
 
   const triggers = new TriggerRepository(db)
   const scheduler = new Scheduler({
@@ -140,12 +143,12 @@ export async function buildServer({
     driver,
     store,
     logger,
-    timeZone: config.timeZone,
+    timeZone,
   })
   scheduler.start()
   app.addHook('onClose', async () => scheduler.stop())
 
-  await registerTriggerRoutes(app, { triggers, scheduler, timeZone: config.timeZone })
+  await registerTriggerRoutes(app, { triggers, scheduler, timeZone })
 
   app.get('/api/homekit', async () => ({
     enabled: config.homekit.enabled,

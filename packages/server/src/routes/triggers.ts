@@ -7,7 +7,7 @@ import type { Scheduler } from '../triggers/scheduler.js'
 export type TriggerRoutesDeps = {
   triggers: TriggerRepository
   scheduler: Scheduler
-  timeZone: string
+  timeZone: () => string
 }
 
 const idParamsSchema = z.object({ id: z.string().min(1) })
@@ -20,7 +20,7 @@ export async function registerTriggerRoutes(
     triggers: triggers.list(),
     // The UI shows this so "07:30" is unambiguous when the container's zone
     // isn't what the user assumed.
-    timeZone,
+    timeZone: timeZone(),
   }))
 
   app.post('/api/triggers', async (request, reply) => {

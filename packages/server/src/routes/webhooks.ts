@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { ActivationEngine } from '../presets/activate.js'
 import { pauseAllMusic } from '../presets/pause-all.js'
 import type { PresetRepository } from '../presets/repository.js'
-import type { SettingsStore } from '../settings.js'
+import { isValidTimeZone, type SettingsStore } from '../settings.js'
 import type { SonosDriver } from '../sonos/driver.js'
 import type { SystemStateStore } from '../state/store.js'
 
@@ -14,6 +14,8 @@ export type WebhookRoutesDeps = {
   driver: SonosDriver
   store: SystemStateStore
   settings: SettingsStore
+  /** Effective zone: the stored setting, or the environment's if unset. */
+  timeZone: () => string
 }
 
 const tokenParamsSchema = z.object({ token: z.string().min(1) })
@@ -98,6 +100,25 @@ export async function registerWebhookRoutes(app: FastifyInstance, deps: WebhookR
   app.post('/api/pause-all/regenerate-token', async () => ({
     token: deps.settings.regeneratePauseAllToken(),
   }))
+
+  /**
+   * The zone schedules and time-based rules are read in.
+   *
+   * One zone for the whole household, not one per browser: the scheduler fires
+   * on the server, hours after the last tab was closed.
+   */
+  app.get('/api/timezone', async () => ({ timeZone: deps.timeZone() }))
+
+  app.put('/api/timezone', async (request, reply) => {
+    const body = z.object({ timeZone: z.string().min(1) }).parse(request.body)
+    if (!isValidTimeZone(body.timeZone)) {
+      return reply
+        .status(400)
+        .send({ error: 'invalid_timezone', message: `${body.timeZone} is not a known time zone` })
+    }
+    deps.settings.setTimeZone(body.timeZone)
+    return { timeZone: deps.timeZone() }
+  })
 
   app.get('/api/blocklist', async () => ({ rules: deps.settings.blocklist() }))
 

@@ -23,7 +23,7 @@ export type SchedulerDeps = {
   driver: SonosDriver
   store: SystemStateStore
   logger: Logger
-  timeZone: string
+  timeZone: () => string
   now?: () => Date
 }
 
@@ -50,7 +50,7 @@ export class Scheduler {
     this.deps.store.on('change', this.onStoreChange)
     this.timer = setInterval(() => void this.tick(), TICK_MS)
     this.timer.unref()
-    this.logger.info({ timeZone: this.deps.timeZone }, 'scheduler started')
+    this.logger.info({ timeZone: this.deps.timeZone() }, 'scheduler started')
   }
 
   stop() {
@@ -77,7 +77,7 @@ export class Scheduler {
 
   private async runSchedules() {
     const now = this.now()
-    const clock = clockFrom(now, this.deps.timeZone)
+    const clock = clockFrom(now, this.deps.timeZone())
 
     for (const row of this.deps.triggers.rowsFor('schedule')) {
       const config = JSON.parse(row.configJson) as ScheduleConfig

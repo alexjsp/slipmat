@@ -166,6 +166,33 @@ describe('preset and webhook routes', () => {
     })
   })
 
+  describe('the household time zone', () => {
+    it('is settable, and is what schedules are then read in', async () => {
+      const put = await app.inject({
+        method: 'PUT',
+        url: '/api/timezone',
+        payload: { timeZone: 'Europe/London' },
+      })
+      expect(put.statusCode).toBe(200)
+      expect(put.json().timeZone).toBe('Europe/London')
+
+      // The scheduler and the schedules screen read the same value, and pick it
+      // up without a restart.
+      const triggers = await app.inject({ method: 'GET', url: '/api/triggers' })
+      expect(triggers.json().timeZone).toBe('Europe/London')
+    })
+
+    it('refuses a zone the platform does not know', async () => {
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/api/timezone',
+        payload: { timeZone: 'Middle/Earth' },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toBe('invalid_timezone')
+    })
+  })
+
   it('updates and deletes', async () => {
     const preset = await create()
 

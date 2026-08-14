@@ -101,7 +101,7 @@ describe('ActivationEngine', () => {
       cache,
       logger,
       repo,
-      timeZone: 'UTC',
+      timeZone: () => 'UTC',
       // Pinned, because the random opening track decides whether the fake has
       // any metadata for what is playing by the time the prune runs — which
       // decides whether a duplicate of the playing song is protected. Left to
@@ -303,7 +303,7 @@ describe('ActivationEngine', () => {
       cache,
       logger,
       repo,
-      timeZone: 'UTC',
+      timeZone: () => 'UTC',
       queueGapMs: 0,
       skipSettleMs: 0,
       settings: {
@@ -335,7 +335,7 @@ describe('ActivationEngine', () => {
       cache,
       logger,
       repo,
-      timeZone: 'UTC',
+      timeZone: () => 'UTC',
       queueGapMs: 0,
       skipSettleMs: 0,
       // Always start on the first track, which is the blocked one.
@@ -370,7 +370,7 @@ describe('ActivationEngine', () => {
       cache,
       logger,
       repo,
-      timeZone: 'UTC',
+      timeZone: () => 'UTC',
       queueGapMs: 0,
       skipSettleMs: 0,
       random: () => 0,
@@ -399,7 +399,7 @@ describe('ActivationEngine', () => {
       cache,
       logger,
       repo,
-      timeZone: 'UTC',
+      timeZone: () => 'UTC',
       queueGapMs: 0,
       skipSettleMs: 0,
       settings: {
@@ -589,7 +589,7 @@ describe('ActivationEngine', () => {
         cache: cache2,
         logger,
         repo: repo2,
-        timeZone: 'UTC',
+        timeZone: () => 'UTC',
       })
       return { driver: smallDriver, repo: repo2, engine: engine2 }
     }
@@ -669,7 +669,7 @@ describe('ActivationEngine', () => {
         cache: cache2,
         logger,
         repo: repo2,
-        timeZone: 'UTC',
+        timeZone: () => 'UTC',
         now: () => now,
         queueGapMs: 0,
         skipSettleMs: 0,
@@ -807,7 +807,7 @@ describe('ActivationEngine', () => {
           cache,
           logger,
           repo,
-          timeZone: 'UTC',
+          timeZone: () => 'UTC',
           random,
           queueGapMs: 0,
           skipSettleMs: 0,
@@ -835,7 +835,16 @@ describe('ActivationEngine', () => {
       )
       const sources = [{ kind: 'sonos_playlist' as const, ref: 'SQ:1', label: 'Jazz' }]
       const engineWith = (random: () => number) =>
-        new ActivationEngine({ db, driver, store, cache, logger, repo, timeZone: 'UTC', random })
+        new ActivationEngine({
+          db,
+          driver,
+          store,
+          cache,
+          logger,
+          repo,
+          timeZone: () => 'UTC',
+          random,
+        })
 
       await engineWith(() => 0).activate(create({ name: 'Low', repeatAll: true, sources }))
       const low = driver.calls.filter((call) => call.method === 'seekToTrack').at(-1)?.args[1]
@@ -1025,7 +1034,7 @@ describe('ActivationEngine', () => {
         cache,
         logger,
         repo,
-        timeZone: 'UTC',
+        timeZone: () => 'UTC',
         now: () => new Date(Date.now() + 60_000),
       })
 

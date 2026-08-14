@@ -43,6 +43,11 @@ export function getJson<T>(path: string): Promise<T> {
   return request('GET', path) as Promise<T>
 }
 
+/** A PUT that fails loudly, for the same reasons as `getJson`. */
+export function putJson<T>(path: string, body: unknown): Promise<T> {
+  return request('PUT', path, body) as Promise<T>
+}
+
 /** Replace the list of music never to play. */
 export function saveBlocklist(rules: unknown[]): Promise<unknown> {
   return request('PUT', '/api/blocklist', { rules })

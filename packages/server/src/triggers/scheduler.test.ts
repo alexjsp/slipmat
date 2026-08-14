@@ -69,7 +69,7 @@ describe('Scheduler', () => {
       driver,
       store,
       logger,
-      timeZone: 'UTC',
+      timeZone: () => 'UTC',
       now: () => now,
     })
 
@@ -95,7 +95,7 @@ describe('Scheduler', () => {
       cache,
       logger,
       repo: presets,
-      timeZone: 'UTC',
+      timeZone: () => 'UTC',
       now: () => now,
     })
   })
@@ -229,7 +229,7 @@ describe('Scheduler', () => {
       cache,
       logger,
       repo: presets,
-      timeZone: 'UTC',
+      timeZone: () => 'UTC',
       now: () => now,
     })
 

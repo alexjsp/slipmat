@@ -15,7 +15,7 @@ import type { SourceCache } from '../sources/cache.js'
 
 export type PresetRoutesDeps = {
   /** IANA zone for the "what would this do right now?" preview. */
-  timeZone: string
+  timeZone: () => string
   repo: PresetRepository
   engine: ActivationEngine
   driver: SonosDriver
@@ -201,7 +201,7 @@ export async function registerPresetRoutes(
       rules: repo.rulesFor(id),
       // What this preset would actually do if fired right now — so a rule can
       // be checked without waiting for Thursday.
-      preview: evaluateRules(preset, repo.rulesFor(id), clockFrom(new Date(), timeZone)),
+      preview: evaluateRules(preset, repo.rulesFor(id), clockFrom(new Date(), timeZone())),
     }
   })
 
@@ -227,7 +227,7 @@ export async function registerPresetRoutes(
 
     return {
       rules,
-      preview: evaluateRules(preset, rules, clockFrom(new Date(), timeZone)),
+      preview: evaluateRules(preset, rules, clockFrom(new Date(), timeZone())),
     }
   })
 

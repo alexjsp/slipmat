@@ -3,6 +3,7 @@ import { DAY_LABELS } from '@slipmat/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Clock, Moon, Plus, Trash2, Tv } from 'lucide-react'
 import { useState } from 'react'
+import { Link } from 'wouter'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -87,7 +88,19 @@ export function SchedulesPage({ onError }: { onError: (message: string) => void 
         <div>
           <h2 className="font-semibold text-lg">Schedules</h2>
           {query.data && (
-            <p className="text-muted-foreground text-xs">Times are {query.data.timeZone}</p>
+            <p className="text-muted-foreground text-xs">
+              Times are {query.data.timeZone}
+              {/* Silent otherwise: a schedule set at 07:30 from a phone in
+                  another zone fires at 07:30 on the server, not on the phone. */}
+              {query.data.timeZone !== Intl.DateTimeFormat().resolvedOptions().timeZone && (
+                <>
+                  , not this device's{' '}
+                  <Link href="/settings" className="underline">
+                    change it
+                  </Link>
+                </>
+              )}
+            </p>
           )}
         </div>
       </div>

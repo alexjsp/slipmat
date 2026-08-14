@@ -96,7 +96,8 @@ export type ActivationDeps = {
   logger: Logger
   repo: PresetRepository
   /** IANA zone for evaluating time-based rules. */
-  timeZone: string
+  /** Read per activation, so changing it in Settings takes effect at once. */
+  timeZone: () => string
   /** Injectable so rule behaviour can be tested without waiting for Thursday. */
   now?: () => Date
   /** Injectable so the random choice of opening source can be pinned in tests. */
@@ -267,7 +268,7 @@ export class ActivationEngine {
     // Rules are evaluated once, here — a preset started at 20:59 does not
     // mutate into the wind-down version at 21:00 while someone is listening.
     const rules = this.deps.repo.rulesFor(preset.id)
-    const clock = clockFrom(this.now(), this.deps.timeZone)
+    const clock = clockFrom(this.now(), this.deps.timeZone())
     const effective = evaluateRules(preset, rules, clock)
     if (effective.appliedRuleLabels.length > 0) {
       this.logger.info(
