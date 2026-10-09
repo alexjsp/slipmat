@@ -49,6 +49,8 @@ export type FakeSonosDriverOptions = {
   zones?: { id: string; name: string }[]
   /** Zones that should start out playing TV audio. */
   tvZoneIds?: string[]
+  /** Artwork to serve for a path; unset serves an empty image, as tests expect. */
+  artwork?: (path: string) => { body: ArrayBuffer; contentType: string } | undefined
 }
 
 const DEFAULT_ZONES = [
@@ -90,8 +92,10 @@ export class FakeSonosDriver implements SonosDriver {
   private readonly browseTree = new Map<string, DriverBrowseItem[]>()
   private readonly playModes = new Map<string, DriverPlayMode>()
   private readonly refuseJoin = new Set<string>()
+  private readonly artwork: FakeSonosDriverOptions['artwork']
 
   constructor(options: FakeSonosDriverOptions = {}) {
+    this.artwork = options.artwork
     const zones = options.zones ?? DEFAULT_ZONES
     for (const [index, zone] of zones.entries()) {
       this.zones.set(zone.id, {
@@ -318,8 +322,11 @@ export class FakeSonosDriver implements SonosDriver {
     }
   }
 
-  async fetchArt(): Promise<{ body: ArrayBuffer; contentType: string }> {
-    return { body: new ArrayBuffer(0), contentType: 'image/jpeg' }
+  async fetchArt(
+    _zoneId: string,
+    path: string,
+  ): Promise<{ body: ArrayBuffer; contentType: string }> {
+    return this.artwork?.(path) ?? { body: new ArrayBuffer(0), contentType: 'image/jpeg' }
   }
 
   // --- content ------------------------------------------------------------
