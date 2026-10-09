@@ -88,6 +88,9 @@ docker run -d --name slipmat \
 
 Then open `http://<host>:5544`.
 
+`latest` is the most recent release. To follow every change on `main` instead, use `edge`, or pin
+a version such as `1.0.0` or `1.0`.
+
 ### `--network host` is required
 
 Not a convenience — three things depend on it:
@@ -147,6 +150,9 @@ just check      # lint, typecheck, test
 
 > ⚠️ **Tests never touch real speakers.** They run against the fake Sonos layer. Anything that
 > would mutate real hardware needs an explicit ask first — see [`CLAUDE.md`](CLAUDE.md).
+
+`just release` tags a new version, offering the next major, minor or patch, and CI publishes it
+as `latest` once the checks pass. Pushes to `main` publish `edge` only.
 
 Personal recipes, such as a deploy to your own server, can go in a gitignored
 `local/local.just`; the justfile imports it when it exists.

@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+#
+# Tag a release. CI turns the tag into the `latest` image, plus `X.Y.Z`, `X.Y`
+# and `X`, which is what the Unraid template and the README install.
+#
+#   ./scripts/release            pick the next major, minor or patch version
+#   ./scripts/release patch      or major / minor
+#   ./scripts/release 1.4.0      an exact version (a leading v is fine)
+#
+# Releases what is on origin/main, so push first. Nothing is tagged until you
+# confirm.
+
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+die() {
+  echo "release: $*" >&2
+  exit 1
+}
+
+has_gum() { command -v gum >/dev/null 2>&1 && [ -t 0 ]; }
+
+# --- what we would release -------------------------------------------------
+
+[ -z "$(git status --porcelain)" ] || die 'the working tree has uncommitted changes'
+[ "$(git rev-parse --abbrev-ref HEAD)" = main ] || die 'releases are cut from main'
+
+git fetch --quiet --tags origin main
+# The tag names this exact commit, and CI builds it from GitHub, so it has to be
+# there already — and nothing newer on GitHub should be silently left out.
+[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] ||
+  die 'main and origin/main differ; push or pull first'
+
+already="$(git tag --points-at HEAD --list 'v[0-9]*')"
+[ -z "${already}" ] || die "this commit is already released as ${already}"
+
+current="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+current="${current#v}"
+current="${current:-0.0.0}"
+IFS=. read -r major minor patch <<<"${current}"
+
+next_major="$((major + 1)).0.0"
+next_minor="${major}.$((minor + 1)).0"
+next_patch="${major}.${minor}.$((patch + 1))"
+
+# --- which version ---------------------------------------------------------
+
+choice="${1:-}"
+if [ -z "${choice}" ]; then
+  echo "Current release: v${current}"
+  options=("patch  v${next_patch}" "minor  v${next_minor}" "major  v${next_major}")
+  if has_gum; then
+    choice="$(gum choose --header 'Release which version?' "${options[@]}")" || exit 1
+  else
+    PS3='Release which version? '
+    select picked in "${options[@]}"; do
+      [ -n "${picked:-}" ] && choice="${picked}" && break
+    done
+  fi
+  choice="${choice%% *}"
+fi
+
+case "${choice}" in
+  major) version="${next_major}" ;;
+  minor) version="${next_minor}" ;;
+  patch) version="${next_patch}" ;;
+  *) version="${choice#v}" ;;
+esac
+
+[[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "not a version: ${choice}"
+git rev-parse --quiet --verify "refs/tags/v${version}" >/dev/null && die "v${version} already exists"
+# Highest first: if the new version is not the top of the two, it is going backwards.
+[ "$(printf '%s\n%s\n' "${version}" "${current}" | sort -V | tail -n 1)" = "${version}" ] &&
+  [ "${version}" != "${current}" ] ||
+  die "v${version} is not newer than v${current}"
+
+# --- confirm and tag -------------------------------------------------------
+
+echo
+echo "Changes since v${current}:"
+if [ "${current}" = 0.0.0 ]; then
+  git log --oneline -n 20
+else
+  git log --oneline "v${current}..HEAD"
+fi
+echo
+
+prompt="Tag $(git rev-parse --short HEAD) as v${version} and publish it as latest?"
+if has_gum; then
+  gum confirm "${prompt}" || exit 1
+else
+  read -r -p "${prompt} [y/N] " answer
+  [[ "${answer}" =~ ^[Yy]$ ]] || exit 1
+fi
+
+git tag --annotate "v${version}" --message "Slipmat v${version}"
+git push --quiet origin "v${version}"
+
+# A GitHub Release gives the tag a page and generated notes; the image comes
+# from the tag either way.
+if command -v gh >/dev/null 2>&1; then
+  gh release create "v${version}" --verify-tag --generate-notes --title "v${version}"
+fi
+
+echo "Tagged v${version}. CI publishes the image once the checks pass."
+if command -v gh >/dev/null 2>&1; then
+  echo "  $(gh repo view --json url --jq .url)/actions"
+fi

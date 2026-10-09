@@ -62,6 +62,12 @@ docker-dev:
 docker-down:
   docker compose -f compose.local.yml down
 
+# Tag a release, which CI publishes as the `latest` image. With no version,
+# offers the next major, minor or patch; also takes `patch`, `minor`, `major` or
+# an exact version like 1.4.0.
+release version="":
+  ./scripts/release {{version}}
+
 # Personal, gitignored recipes (deploy targets and the like) live here.
 import? 'local/local.just'
 
