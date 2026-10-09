@@ -45,7 +45,13 @@ export async function buildServer({
   // Widened to FastifyBaseLogger deliberately: passing pino's concrete Logger
   // specialises Fastify's logger generic, which then makes every route module
   // typed against a plain FastifyInstance incompatible.
-  const app = Fastify({ loggerInstance: logger as FastifyBaseLogger, trustProxy: true })
+  const app = Fastify({
+    loggerInstance: logger as FastifyBaseLogger,
+    // Forwarded headers are believed only from a proxy on this machine or the
+    // LAN. `true` believed them from anyone, so any client could name its own
+    // address and walk straight past the login throttle.
+    trustProxy: 'loopback, linklocal, uniquelocal',
+  })
 
   const driver = injected ?? createDriver(config, logger)
   await driver.start()

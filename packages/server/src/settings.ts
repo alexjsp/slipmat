@@ -10,6 +10,10 @@ const BLOCKLIST_KEY = 'blocklist'
 const TIMEZONE_KEY = 'time_zone'
 const SESSION_SECRET_KEY = 'session_secret'
 const HOMEKIT_PIN_KEY = 'homekit_pin'
+const SESSIONS_KEY = 'sessions'
+
+/** A signed-in browser. `tag` binds it to the password it was issued under. */
+export type StoredSession = { expiresAt: number; tag: string }
 
 /** HAP refuses these outright as too guessable. */
 const DISALLOWED_PINS = new Set([
@@ -65,6 +69,25 @@ export class SettingsStore {
     const secret = randomBytes(32).toString('base64url')
     this.set(SESSION_SECRET_KEY, secret)
     return secret
+  }
+
+  /**
+   * Live login sessions, by id. A settings row rather than a table: a household
+   * has a handful of browsers, and this keeps it free of a migration.
+   */
+  sessions(): Record<string, StoredSession> {
+    const raw = this.get(SESSIONS_KEY)
+    if (!raw) return {}
+    try {
+      return JSON.parse(raw) as Record<string, StoredSession>
+    } catch {
+      // A damaged row signs everyone out rather than locking everyone out.
+      return {}
+    }
+  }
+
+  setSessions(sessions: Record<string, StoredSession>): void {
+    this.set(SESSIONS_KEY, JSON.stringify(sessions))
   }
 
   /**

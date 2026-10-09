@@ -1,9 +1,10 @@
-import { createHmac } from 'node:crypto'
+import { createHmac, randomBytes } from 'node:crypto'
 import argon2 from 'argon2'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { Config } from './config.js'
 import type { Logger } from './logger.js'
+import { LoginThrottle } from './login-throttle.js'
 import type { SettingsStore } from './settings.js'
 
 const loginBodySchema = z.object({ password: z.string().min(1) })
@@ -110,11 +111,23 @@ export async function registerAuth(app: FastifyInstance, { config, logger, setti
   // let anyone sign their own session cookie.
   const secret = config.sessionSecret ?? settings.sessionSecret()
 
-  // The session value is tied to the password, so changing the password signs
-  // every existing session out.
-  const sessionValue = config.password
+  // Sessions are ids held server-side, so signing out actually ends one: a
+  // signed constant stayed valid wherever it had been copied. Each carries a
+  // tag derived from the password, so changing the password ends them all.
+  const passwordTag = config.password
     ? createHmac('sha256', secret).update(config.password).digest('base64url')
     : undefined
+  const sessions = new Map(Object.entries(settings.sessions()))
+  const saveSessions = () => settings.setSessions(Object.fromEntries(sessions))
+  const isLiveSession = (id: string) => {
+    const session = sessions.get(id)
+    return !!session && session.tag === passwordTag && session.expiresAt > Date.now()
+  }
+  const sessionIdFrom = (request: FastifyRequest) => {
+    const cookie = request.cookies[SESSION_COOKIE]
+    const unsigned = cookie ? request.unsignCookie(cookie) : undefined
+    return unsigned?.valid ? unsigned.value : null
+  }
 
   const cookie = await import('@fastify/cookie')
   await app.register(cookie.default, { secret })
@@ -140,27 +153,51 @@ export async function registerAuth(app: FastifyInstance, { config, logger, setti
     if (!enabled) return
     if (isPublicRoute(route)) return
 
-    const session = request.cookies[SESSION_COOKIE]
-    const unsigned = session ? request.unsignCookie(session) : undefined
-    if (!unsigned?.valid || unsigned.value !== sessionValue) {
+    const sessionId = sessionIdFrom(request)
+    if (!sessionId || !isLiveSession(sessionId)) {
       return reply.status(401).send({ error: 'unauthorized', message: 'Sign in required' })
     }
   })
 
   app.get('/api/auth/status', async () => ({ required: enabled }))
 
+  const throttle = new LoginThrottle()
+
   app.post('/api/auth/login', async (request, reply) => {
     if (!enabled) return { ok: true }
+
+    // Checked before the password, so a locked-out guesser learns nothing from
+    // trying anyway.
+    const waitMs = throttle.retryAfterMs(request.ip)
+    if (waitMs > 0) {
+      const seconds = Math.ceil(waitMs / 1000)
+      return reply
+        .status(429)
+        .header('retry-after', String(seconds))
+        .send({ error: 'too_many_attempts', message: 'Too many attempts. Try again later.' })
+    }
 
     const body = loginBodySchema.parse(request.body)
     const ok = passwordHash ? await argon2.verify(passwordHash, body.password) : false
     if (!ok) {
+      throttle.recordFailure(request.ip)
+      logger.warn({ ip: request.ip }, 'failed login')
       // Uniform failure: no distinction between wrong password and anything else.
       return reply.status(401).send({ error: 'unauthorized', message: 'Incorrect password' })
     }
+    throttle.recordSuccess(request.ip)
+
+    // Expired sessions, and ones from an earlier password, go when a new one starts.
+    for (const id of sessions.keys()) if (!isLiveSession(id)) sessions.delete(id)
+    const sessionId = randomBytes(24).toString('base64url')
+    sessions.set(sessionId, {
+      expiresAt: Date.now() + SESSION_MAX_AGE_SECONDS * 1000,
+      tag: passwordTag ?? '',
+    })
+    saveSessions()
 
     return reply
-      .setCookie(SESSION_COOKIE, sessionValue ?? '', {
+      .setCookie(SESSION_COOKIE, sessionId, {
         signed: true,
         httpOnly: true,
         sameSite: 'lax',
@@ -173,9 +210,11 @@ export async function registerAuth(app: FastifyInstance, { config, logger, setti
       .send({ ok: true })
   })
 
-  app.post('/api/auth/logout', async (_request, reply) =>
-    reply.clearCookie(SESSION_COOKIE, { path: '/' }).send({ ok: true }),
-  )
+  app.post('/api/auth/logout', async (request, reply) => {
+    const sessionId = sessionIdFrom(request)
+    if (sessionId && sessions.delete(sessionId)) saveSessions()
+    return reply.clearCookie(SESSION_COOKIE, { path: '/' }).send({ ok: true })
+  })
 
   if (enabled) {
     logger.info('authentication enabled')

@@ -1,4 +1,7 @@
 import { createHmac } from 'node:crypto'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { __testing } from './auth.js'
 import { loadConfig } from './config.js'
@@ -138,22 +141,41 @@ describe('authentication', () => {
   })
 
   it('signs every session out when the password changes', async () => {
-    const secret = 'x'.repeat(32)
-    const before = await build({ SLIPMAT_PASSWORD: 'hunter2', SLIPMAT_SESSION_SECRET: secret })
+    // One data directory across both boots, as a real restart would have.
+    const dataDir = mkdtempSync(join(tmpdir(), 'slipmat-auth-'))
+    const before = await build({ SLIPMAT_PASSWORD: 'hunter2', SLIPMAT_DATA_DIR: dataDir })
     const login = await before.inject({
       method: 'POST',
       url: '/api/auth/login',
       payload: { password: 'hunter2' },
     })
     const cookie = login.cookies[0]!
+    const cookies = { [cookie.name]: cookie.value }
+    await before.close()
 
-    const after = await build({ SLIPMAT_PASSWORD: 'correct-horse', SLIPMAT_SESSION_SECRET: secret })
-    const res = await after.inject({
-      method: 'GET',
-      url: '/api/system',
-      cookies: { [cookie.name]: cookie.value },
+    const same = await build({ SLIPMAT_PASSWORD: 'hunter2', SLIPMAT_DATA_DIR: dataDir })
+    expect((await same.inject({ method: 'GET', url: '/api/system', cookies })).statusCode).toBe(200)
+    await same.close()
+
+    const after = await build({ SLIPMAT_PASSWORD: 'correct-horse', SLIPMAT_DATA_DIR: dataDir })
+    expect((await after.inject({ method: 'GET', url: '/api/system', cookies })).statusCode).toBe(
+      401,
+    )
+  })
+
+  it('ends the session for real on sign-out, not just in that browser', async () => {
+    const app = await build({ SLIPMAT_PASSWORD: 'hunter2' })
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { password: 'hunter2' },
     })
-    expect(res.statusCode).toBe(401)
+    const cookie = login.cookies[0]!
+    const cookies = { [cookie.name]: cookie.value }
+
+    await app.inject({ method: 'POST', url: '/api/auth/logout', cookies })
+    // A copy of the cookie taken before sign-out is now worthless.
+    expect((await app.inject({ method: 'GET', url: '/api/system', cookies })).statusCode).toBe(401)
   })
 
   it('refuses a state change sent by another site, even with auth off', async () => {
@@ -178,6 +200,40 @@ describe('authentication', () => {
     expect(sameSite.statusCode).not.toBe(403)
     const noOrigin = await app.inject({ method: 'POST', url: '/api/pause-all' })
     expect(noOrigin.statusCode).not.toBe(403)
+  })
+
+  it('makes a password guesser wait', async () => {
+    const app = await build({ SLIPMAT_PASSWORD: 'hunter2' })
+    const attempt = (password: string) =>
+      app.inject({ method: 'POST', url: '/api/auth/login', payload: { password } })
+    for (let i = 0; i < 10; i++) expect((await attempt('wrong')).statusCode).toBe(401)
+
+    // Locked out even with the right password, so a lucky guess stays unconfirmed.
+    const locked = await attempt('hunter2')
+    expect(locked.statusCode).toBe(429)
+    expect(Number(locked.headers['retry-after'])).toBeGreaterThan(0)
+  })
+
+  it('does not take a forwarded address from just anyone', async () => {
+    const app = await build({ SLIPMAT_PASSWORD: 'hunter2' })
+    for (let i = 0; i < 10; i++) {
+      await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { password: 'wrong' },
+        // A client on a public address claiming to be a fresh one each time.
+        remoteAddress: '203.0.113.9',
+        headers: { 'x-forwarded-for': `198.51.100.${i}` },
+      })
+    }
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { password: 'wrong' },
+      remoteAddress: '203.0.113.9',
+      headers: { 'x-forwarded-for': '198.51.100.200' },
+    })
+    expect(res.statusCode).toBe(429)
   })
 
   it('rejects a rebinding Host even when auth is off', async () => {
