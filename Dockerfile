@@ -40,9 +40,8 @@ ENV SLIPMAT_DATA_DIR=/data
 ENV SLIPMAT_VERSION=${SLIPMAT_VERSION}
 WORKDIR /app
 
-# Both ids are pinned, not left to useradd. A bind-mounted /data shadows the
-# ownership set below, so whoever prepares the host directory has to chown it to
-# these exact numbers — which means they cannot be allowed to drift. `useradd`
+# Both ids are pinned, not left to useradd: they are the default PUID/PGID the
+# entrypoint chowns /data to, so they cannot be allowed to drift. `useradd`
 # alone would have picked the next free gid (999 on this base image), and a base
 # image bump could silently change it.
 RUN groupadd --system --gid 10001 slipmat \
@@ -53,7 +52,10 @@ COPY --from=build --chown=slipmat:slipmat /tmp/server/node_modules ./node_module
 COPY --from=build --chown=slipmat:slipmat /app/packages/server/dist ./dist
 COPY --from=build --chown=slipmat:slipmat /app/packages/web/dist ./public
 
-USER slipmat
+# No USER: the entrypoint starts as root only long enough to fix /data's
+# ownership, then drops to PUID/PGID (default slipmat, 10001) before the server
+# runs.
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/slipmat-entrypoint
 VOLUME ["/data"]
 EXPOSE 5544
 
@@ -61,4 +63,5 @@ EXPOSE 5544
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.SLIPMAT_PORT||5544)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
+ENTRYPOINT ["/usr/local/bin/slipmat-entrypoint"]
 CMD ["node", "dist/index.js"]

@@ -23,6 +23,27 @@ It talks to Sonos entirely over the local network — no cloud, no Sonos account
 
 ## Running it
 
+### Unraid
+
+Install **Slipmat** from Community Applications. Until it's listed there, fetch the template on the
+server and pick it from **Docker → Add Container → Template**:
+
+```sh
+wget -O /boot/config/plugins/dockerMan/templates-user/my-Slipmat.xml \
+  https://raw.githubusercontent.com/alexjsp/slipmat/main/unraid/slipmat.xml
+```
+
+### Docker Compose
+
+```sh
+curl -O https://raw.githubusercontent.com/alexjsp/slipmat/main/compose.yml
+docker compose up -d
+```
+
+Settings go in a `.env` beside it; every one is optional.
+
+### Docker
+
 ```sh
 docker run -d --name slipmat \
   --network host \
@@ -53,10 +74,12 @@ See [`.env.example`](.env.example) for the full list. The ones that matter:
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `SLIPMAT_PASSWORD` | — | **Optional.** Setting it turns authentication on; unset means no login. |
-| `SLIPMAT_SESSION_SECRET` | — | Only needed when a password is set. Rotating it logs everyone out. |
+| `SLIPMAT_SESSION_SECRET` | generated | Signs login sessions. Generated and stored on first run if unset. |
 | `SLIPMAT_PORT` | `5544` | |
 | `SLIPMAT_SEED_IP` | — | Discovery fallback. |
 | `SLIPMAT_HOMEKIT` | `0` | Set to `1` to enable the embedded HomeKit bridge. |
+| `SLIPMAT_HOMEKIT_PIN` | generated | Pairing code. Generated on first run if unset, and shown in Settings. |
+| `PUID` / `PGID` | `10001` | User and group the server runs as. `/data` is handed to them on start. |
 
 ### Authentication is optional
 
@@ -87,17 +110,8 @@ just check      # lint, typecheck, test
 > ⚠️ **Tests never touch real speakers.** They run against the fake Sonos layer. Anything that
 > would mutate real hardware needs an explicit ask first — see [`CLAUDE.md`](CLAUDE.md).
 
-### Deploying to Unraid
-
-Optionally create `/mnt/user/appdata/slipmat_source/.env` on the server for settings like
-`SLIPMAT_PASSWORD` — it isn't required. Then:
-
-```sh
-just deploy-unraid
-```
-
-This rsyncs the source tree to the server, builds the image there and brings the stack up. Override
-`DEPLOY_HOST` / `DEPLOY_PATH` if your box isn't at the default.
+Personal recipes, such as a deploy to your own server, can go in a gitignored
+`local/local.just`; the justfile imports it when it exists.
 
 ## Prior art
 
@@ -105,3 +119,7 @@ This rsyncs the source tree to the server, builds the image there and brings the
 its preset semantics were a useful reference. Slipmat is built on
 [`@svrooij/sonos`](https://github.com/svrooij/node-sonos-ts) instead — actively maintained, fully
 typed, with the event subscriptions the preset state tracking needs.
+
+## License
+
+[MIT](LICENSE)

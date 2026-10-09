@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Slipmat</Name>
+  <Repository>ghcr.io/alexjsp/slipmat:latest</Repository>
+  <Registry>https://github.com/alexjsp/slipmat/pkgs/container/slipmat</Registry>
+  <Network>host</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/alexjsp/slipmat/issues</Support>
+  <Project>https://github.com/alexjsp/slipmat</Project>
+  <Overview>Self-hosted control and automation for a Sonos system, entirely over your local network: no cloud and no Sonos account. A web UI for everyday playback and grouping, plus presets that group speakers, set their volumes and play a shuffled mix of playlists, albums and favourites. Fire presets from the UI, a webhook (Shortcuts, Stream Deck, Node-RED) or an optional HomeKit switch.[br][br]Host networking is required: Sonos discovery is multicast and the speakers call back into Slipmat for live updates, neither of which crosses a bridge network.</Overview>
+  <Category>MediaApp:Music HomeAutomation:</Category>
+  <WebUI>http://[IP]:[PORT:5544]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/alexjsp/slipmat/main/unraid/slipmat.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/alexjsp/slipmat/main/packages/web/public/apple-touch-icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="Appdata" Target="/data" Default="/mnt/user/appdata/slipmat" Mode="rw" Description="Presets, schedules, settings and the source cache (a small SQLite database), plus HomeKit pairing data if enabled." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/slipmat</Config>
+  <Config Name="Web UI port" Target="SLIPMAT_PORT" Default="5544" Mode="" Description="Port the web UI and API listen on. With host networking this is a port on the Unraid server itself." Type="Variable" Display="always" Required="true" Mask="false">5544</Config>
+  <Config Name="Password" Target="SLIPMAT_PASSWORD" Default="" Mode="" Description="Optional. Setting a password turns on login for the web UI and API. Webhooks keep working through their own secret URLs either way." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Allowed hostnames" Target="SLIPMAT_ALLOWED_HOSTS" Default="" Mode="" Description="Comma-separated hostnames you reach Slipmat by, such as a domain behind a reverse proxy. IP addresses, localhost, *.local and *.ts.net always work; anything else is refused to block DNS rebinding." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Speaker IP" Target="SLIPMAT_SEED_IP" Default="" Mode="" Description="Optional. The IP of any one speaker, for networks where discovery can't get through (VLANs, multicast filtering). Slipmat finds the rest of the system from it." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Time zone" Target="SLIPMAT_TZ" Default="" Mode="" Description="Optional IANA time zone (for example Europe/London) for schedules and time-based rules. Defaults to the container's time zone, and can also be changed in Settings." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="HomeKit bridge" Target="SLIPMAT_HOMEKIT" Default="0" Mode="" Description="Set to 1 to expose presets as HomeKit switches." Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="HomeKit PIN" Target="SLIPMAT_HOMEKIT_PIN" Default="" Mode="" Description="Optional pairing code for the HomeKit bridge, in the form 123-45-678. Left blank, one is generated on first run and shown in Settings." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="HomeKit name" Target="SLIPMAT_HOMEKIT_NAME" Default="Slipmat" Mode="" Description="Name of the bridge as it appears in the Home app." Type="Variable" Display="advanced" Required="false" Mask="false">Slipmat</Config>
+  <Config Name="Callback address" Target="SLIPMAT_CALLBACK_HOST" Default="" Mode="" Description="Optional. The server address speakers should send live updates to, when the server has several network interfaces and Slipmat guesses the wrong one." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Log level" Target="SLIPMAT_LOG_LEVEL" Default="info" Mode="" Description="One of trace, debug, info, warn, error." Type="Variable" Display="advanced" Required="false" Mask="false">info</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User the server runs as. /data is handed to this user on start." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group the server runs as." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+</Container>

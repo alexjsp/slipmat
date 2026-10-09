@@ -1,0 +1,16 @@
+# Keep the build context to what the Dockerfile copies. Without this, a local
+# build ships host node_modules (wrong-platform native modules) and any SQLite
+# database sitting in a data directory into the build context.
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+data/
+packages/server/data/
+packages/server/public/
+local/
+.env
+.env.*
+.git
+screenshot*.png
+screenshots/
+coverage/

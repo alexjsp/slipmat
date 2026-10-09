@@ -1,4 +1,5 @@
-# Production / Unraid. Deployed by `just deploy-unraid`.
+# Running Slipmat with Docker Compose. `docker compose up -d` next to a `.env`
+# holding any of the settings below; every one is optional.
 #
 # network_mode: host is REQUIRED, not a convenience:
 #   - SSDP discovery is multicast and does not cross a bridge network
@@ -6,14 +7,11 @@
 #   - HomeKit (when enabled) advertises over mDNS
 services:
   slipmat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: slipmat:local
+    image: ghcr.io/alexjsp/slipmat:latest
     container_name: slipmat
     network_mode: host
     volumes:
-      - /mnt/user/appdata/slipmat:/data
+      - ./data:/data
     # Every setting the server reads has to be listed here. Compose reads .env
     # for interpolation but injects nothing on its own, so a variable set in
     # .env and missing below is silently ignored — the app starts happily on the
@@ -22,6 +20,10 @@ services:
     # SLIPMAT_FAKE_SONOS is deliberately absent: production should not be able
     # to run against the in-memory household by way of a stray .env line.
     environment:
+      # Who the server runs as, and who /data is handed to on start. Unraid
+      # convention is 99:100; the default is the image's own slipmat user.
+      PUID: ${PUID:-10001}
+      PGID: ${PGID:-10001}
       SLIPMAT_HOST: ${SLIPMAT_HOST:-0.0.0.0}
       SLIPMAT_PORT: ${SLIPMAT_PORT:-5544}
       SLIPMAT_DATA_DIR: /data
@@ -46,6 +48,7 @@ services:
       # Fallback if SSDP discovery is blocked; a single speaker IP is enough.
       SLIPMAT_SEED_IP: ${SLIPMAT_SEED_IP:-}
       SLIPMAT_HOMEKIT: ${SLIPMAT_HOMEKIT:-0}
-      SLIPMAT_HOMEKIT_PIN: ${SLIPMAT_HOMEKIT_PIN:-031-45-154}
+      # Unset generates a PIN on first run; it is shown in Settings.
+      SLIPMAT_HOMEKIT_PIN: ${SLIPMAT_HOMEKIT_PIN:-}
       SLIPMAT_HOMEKIT_NAME: ${SLIPMAT_HOMEKIT_NAME:-Slipmat}
     restart: unless-stopped
