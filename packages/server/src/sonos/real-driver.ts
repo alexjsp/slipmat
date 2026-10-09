@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events'
-import type { SonosDevice } from '@svrooij/sonos'
-import { MetaDataHelper, SonosManager } from '@svrooij/sonos'
+import { MetaDataHelper, SonosDevice, SonosManager } from '@svrooij/sonos'
 import type { Track as SonosTrack } from '@svrooij/sonos/lib/models/index.js'
 import { PlayMode } from '@svrooij/sonos/lib/models/playmode.js'
 import type { ZoneGroup } from '@svrooij/sonos/lib/models/zone-group.js'
@@ -99,6 +98,11 @@ export class RealSonosDriver implements SonosDriver {
   private zoneGroups: ZoneGroup[] = []
   private readonly deviceState = new Map<string, DeviceState>()
   private readonly subscribed = new Set<string>()
+
+  /** The device that last answered a household-wide read; asked first next time. */
+  private lastGoodSourceUuid: string | undefined
+  /** Devices whose last household-wide read failed; asked only when nothing else answers. */
+  private readonly failedSourceUuids = new Set<string>()
 
   private timers: NodeJS.Timeout[] = []
   private topologyRefreshQueued = false
@@ -355,13 +359,94 @@ export class RealSonosDriver implements SonosDriver {
   }
 
   private async refreshTopology(): Promise<void> {
-    const device = this.manager?.Devices[0]
-    if (!device) return
-    const groups = await device.GetZoneGroupState()
+    if (!this.manager) return
+    const groups = await this.fromAnyDevice((device) => device.GetZoneGroupState())
+    this.reconcileDevices(groups)
     this.zoneGroups = groups
     // A speaker that rebooted comes back with no subscription of its own.
     for (const d of this.manager?.Devices ?? []) this.attach(d)
     this.changed()
+  }
+
+  /**
+   * Run a household-wide read against whichever speaker will answer it.
+   *
+   * Any speaker can describe the whole household, so these reads used to go to
+   * `Devices[0]` — and when that one speaker died mid-firmware-update, every
+   * topology refresh failed from then on. The last good snapshot was one the
+   * dying speaker had taken of itself alone, so the UI showed one room for as
+   * long as the process lived. Speakers we last heard from are tried first so a
+   * dead one costs a timeout only when nothing better is left.
+   */
+  private async fromAnyDevice<T>(read: (device: SonosDevice) => Promise<T>): Promise<T> {
+    const devices = [...(this.manager?.Devices ?? [])]
+    if (devices.length === 0) throw new Error('No Sonos devices available')
+    // Failures are tracked apart from `unreachable` on purpose: a live speaker
+    // fails these reads too, mid-regroup, and that is no reason to grey it out.
+    const rank = (device: SonosDevice) => {
+      if (device.Uuid === this.lastGoodSourceUuid) return 0
+      if (this.failedSourceUuids.has(device.Uuid)) return 3
+      return this.deviceState.get(device.Uuid)?.unreachable ? 2 : 1
+    }
+    devices.sort((a, b) => rank(a) - rank(b))
+
+    let lastError: unknown
+    for (const device of devices) {
+      try {
+        const result = await read(device)
+        this.lastGoodSourceUuid = device.Uuid
+        this.failedSourceUuids.delete(device.Uuid)
+        return result
+      } catch (err) {
+        lastError = err
+        this.logger.debug({ err, zone: device.Name }, 'household read failed; trying another')
+        if (this.lastGoodSourceUuid === device.Uuid) this.lastGoodSourceUuid = undefined
+        this.failedSourceUuids.add(device.Uuid)
+      }
+    }
+    throw lastError
+  }
+
+  /**
+   * Bring the library's device list in line with what the household reports.
+   *
+   * The library only ever adds devices it hears about from its own topology
+   * subscription, which is pinned to whichever speaker answered discovery and
+   * dies with it. It also never notices a speaker that came back on a new
+   * address — after a reboot DHCP can hand out a different lease, and every
+   * command would keep going to the old one.
+   */
+  private reconcileDevices(groups: ZoneGroup[]) {
+    const manager = this.manager
+    if (!manager) return
+    const devices = manager.Devices
+
+    for (const member of groups.flatMap((g) => g.members)) {
+      const index = devices.findIndex((d) => d.Uuid === member.uuid)
+      const existing = index === -1 ? undefined : devices[index]
+      if (existing && existing.Host === member.host && existing.Port === member.port) continue
+
+      if (existing) {
+        this.logger.info(
+          { zone: member.name, from: existing.Host, to: member.host },
+          'speaker moved address',
+        )
+        try {
+          existing.CancelEvents()
+        } catch (err) {
+          this.logger.debug({ err, zone: member.name }, 'failed to cancel events')
+        }
+        this.subscribed.delete(member.uuid)
+      } else {
+        this.logger.info({ zone: member.name, uuid: member.uuid }, 'new device appeared')
+      }
+
+      // A new address deserves a fresh chance at answering household reads.
+      this.failedSourceUuids.delete(member.uuid)
+      const replacement = new SonosDevice(member.host, member.port, member.uuid, member.name)
+      if (index === -1) devices.push(replacement)
+      else devices[index] = replacement
+    }
   }
 
   private startTimers() {
@@ -378,7 +463,7 @@ export class RealSonosDriver implements SonosDriver {
     })
     every(TOPOLOGY_REFRESH_MS, () => {
       void this.refreshTopology().catch((err) =>
-        this.logger.debug({ err }, 'periodic topology refresh failed'),
+        this.logger.warn({ err }, 'periodic topology refresh failed'),
       )
     })
     every(POSITION_POLL_MS, () => {
@@ -646,19 +731,19 @@ export class RealSonosDriver implements SonosDriver {
     objectId: string,
     options: { start?: number; count?: number } = {},
   ): Promise<DriverBrowseResult> {
-    const device = this.manager?.Devices[0]
-    if (!device) throw new Error('No Sonos devices available')
-
     // Raw Browse, then our own DIDL reader — see didl.ts for why the library's
     // parsed form can't be used here (it decodes res and drops r:resMD).
-    const response = await device.ContentDirectoryService.Browse({
-      ObjectID: objectId,
-      BrowseFlag: 'BrowseDirectChildren',
-      Filter: '*',
-      StartingIndex: options.start ?? 0,
-      RequestedCount: options.count ?? 200,
-      SortCriteria: '',
-    })
+    const { device, response } = await this.fromAnyDevice(async (device) => ({
+      device,
+      response: await device.ContentDirectoryService.Browse({
+        ObjectID: objectId,
+        BrowseFlag: 'BrowseDirectChildren',
+        Filter: '*',
+        StartingIndex: options.start ?? 0,
+        RequestedCount: options.count ?? 200,
+        SortCriteria: '',
+      }),
+    }))
 
     const encoded = typeof response.Result === 'string' ? response.Result : ''
     const entries = parseDidl(encoded)
@@ -684,9 +769,8 @@ export class RealSonosDriver implements SonosDriver {
   }
 
   async listMusicServices(): Promise<DriverMusicService[]> {
-    const device = this.manager?.Devices[0]
-    if (!device) return []
-    const services = await device.MusicServicesSubscribed()
+    if (!this.manager) return []
+    const services = await this.fromAnyDevice((device) => device.MusicServicesSubscribed())
     return (services ?? []).map((service) => ({
       id: Number(service.Id),
       name: service.Name ?? String(service.Id),
