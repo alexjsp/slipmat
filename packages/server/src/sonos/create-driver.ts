@@ -27,5 +27,11 @@ export function createDriver(config: Config, logger: Logger): SonosDriver {
     })
     return fake
   }
+  // The library reads its callback address straight from the environment, the
+  // first time it subscribes to anything. Without this the setting was parsed
+  // and then ignored.
+  if (config.callbackHost && !process.env.SONOS_LISTENER_HOST) {
+    process.env.SONOS_LISTENER_HOST = config.callbackHost
+  }
   return new RealSonosDriver({ logger, seedIp: config.seedIp })
 }

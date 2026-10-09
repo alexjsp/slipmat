@@ -59,9 +59,15 @@ export async function buildServer({
 
   await app.register(fastifyWebsocket)
 
+  const db =
+    config.fakeSonos && config.dataDir === ':memory:'
+      ? openDatabase({ inMemory: true })
+      : openDatabase({ dataDir: config.dataDir })
+  const settings = new SettingsStore(db)
+
   // Registered before any route so the Host check and session guard see
   // everything, including the WebSocket upgrade.
-  await registerAuth(app, { config, logger })
+  await registerAuth(app, { config, logger, settings })
 
   app.get('/api/health', async () => ({
     status: 'ok',
@@ -80,13 +86,8 @@ export async function buildServer({
   })
   await registerSourceRoutes(app, { driver, resolver })
 
-  const db =
-    config.fakeSonos && config.dataDir === ':memory:'
-      ? openDatabase({ inMemory: true })
-      : openDatabase({ dataDir: config.dataDir })
   const cache = new SourceCache(db, resolver, logger)
   const repo = new PresetRepository(db)
-  const settings = new SettingsStore(db)
   // A function, not a value: the zone is a stored setting, and a scheduler that
   // captured it at boot would keep firing on the old one until a restart.
   const timeZone = () => settings.timeZone(config.timeZone)
@@ -117,7 +118,15 @@ export async function buildServer({
   if (config.homekit.enabled) {
     try {
       const { startHomeKitBridge } = await import('./homekit/bridge.js')
-      homekit = await startHomeKitBridge({ config, logger, repo, engine, driver, store })
+      homekit = await startHomeKitBridge({
+        config,
+        logger,
+        repo,
+        engine,
+        driver,
+        store,
+        pincode: config.homekit.pin ?? settings.homekitPin(),
+      })
       app.addHook('onClose', async () => homekit?.stop())
     } catch (err) {
       // A HomeKit failure must not take the whole app down with it.

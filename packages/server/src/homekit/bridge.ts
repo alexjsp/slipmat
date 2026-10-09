@@ -15,6 +15,8 @@ export type HomeKitDeps = {
   engine: ActivationEngine
   driver: SonosDriver
   store: SystemStateStore
+  /** The configured PIN, or the generated one kept in settings. */
+  pincode: string
 }
 
 export type HomeKitBridge = {
@@ -136,7 +138,7 @@ export async function startHomeKitBridge(deps: HomeKitDeps): Promise<HomeKitBrid
 
   bridge.publish({
     username: deriveUsername(bridgeName),
-    pincode: deps.config.homekit.pin,
+    pincode: deps.pincode,
     port: 0,
     category: CATEGORY_BRIDGE,
     addIdentifyingMaterial: true,
@@ -151,12 +153,13 @@ export async function startHomeKitBridge(deps: HomeKitDeps): Promise<HomeKitBrid
     }
   })
 
-  logger.info({ pin: deps.config.homekit.pin }, 'homekit bridge published')
+  // Not the PIN: it is shown in Settings, and logs travel further than that.
+  logger.info('homekit bridge published')
 
   return {
     sync,
     setupUri: () => bridge.setupURI(),
-    pincode: deps.config.homekit.pin,
+    pincode: deps.pincode,
     stop: async () => {
       bridge.unpublish()
     },

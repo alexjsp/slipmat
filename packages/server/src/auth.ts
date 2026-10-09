@@ -1,25 +1,71 @@
+import { createHmac } from 'node:crypto'
 import argon2 from 'argon2'
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { Config } from './config.js'
 import type { Logger } from './logger.js'
+import type { SettingsStore } from './settings.js'
 
 const loginBodySchema = z.object({ password: z.string().min(1) })
 
 const SESSION_COOKIE = 'slipmat_session'
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
-/** Paths that must work without a session, whatever the auth setting. */
-function isPublicPath(url: string): boolean {
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
+
+/**
+ * Routes that must work without a session, whatever the auth setting.
+ *
+ * Takes the *matched route pattern*, never the raw URL. The router
+ * percent-decodes before matching, so `/%61pi/system` reaches the
+ * `/api/system` handler while its raw URL doesn't start with `/api/` at all —
+ * checking the URL let every route through unauthenticated that way.
+ */
+function isPublicRoute(route: string | undefined): boolean {
+  // Unmatched: a 404, or the SPA fallback. Nothing behind it to protect.
+  if (route === undefined) return true
   return (
     // Webhooks carry their own secret, and are used by clients that can't log in.
-    url.startsWith('/api/webhooks/') ||
-    url.startsWith('/api/auth/') ||
-    url === '/api/health' ||
+    route.startsWith('/api/webhooks/') ||
+    route.startsWith('/api/auth/') ||
+    route === '/api/health' ||
     // Everything not under /api is the SPA shell, which needs to load in order
     // to render the login form at all.
-    !url.startsWith('/api/')
+    !route.startsWith('/api/')
   )
+}
+
+/**
+ * A state-changing request sent by some other site's page.
+ *
+ * With no password set (the default) a page on any website can POST to
+ * Slipmat by IP from the visitor's browser — no preflight is needed for a body-less
+ * or text/plain request — and pause the house or rotate tokens. Browsers always
+ * send Origin on such requests, so a mismatch with our own host gives it away.
+ * Hostnames only: the dev proxy and reverse proxies change the port.
+ */
+function isCrossSiteWrite(request: FastifyRequest, extra: string[]): boolean {
+  if (SAFE_METHODS.has(request.method)) return false
+  const origin = request.headers.origin
+  // Shortcuts, curl and Node-RED send no Origin; they are not a browser being
+  // steered by a page.
+  if (!origin) return false
+  let originHost: string
+  try {
+    originHost = new URL(origin).hostname.toLowerCase()
+  } catch {
+    // Includes the literal `null` sent by sandboxed and file:// pages.
+    return true
+  }
+  const ours = [request.hostname, hostnameOf(request.headers.host)].map((h) => h.toLowerCase())
+  return !ours.includes(originHost) && !extra.includes(originHost)
+}
+
+function hostnameOf(host: string | undefined): string {
+  if (!host) return ''
+  // Bracketed IPv6 keeps its colons; anything else loses a trailing port.
+  if (host.startsWith('[')) return host.slice(0, host.indexOf(']') + 1)
+  return host.split(':')[0] ?? ''
 }
 
 /**
@@ -51,25 +97,27 @@ function isAllowedHost(host: string | undefined, extra: string[]): boolean {
 export type AuthDeps = {
   config: Config
   logger: Logger
+  settings: SettingsStore
 }
 
-export async function registerAuth(app: FastifyInstance, { config, logger }: AuthDeps) {
+export async function registerAuth(app: FastifyInstance, { config, logger, settings }: AuthDeps) {
   const enabled = !!config.password
   const passwordHash = config.password ? await argon2.hash(config.password) : undefined
 
-  // Signing the cookie means a session value can't be forged without the secret.
-  const secret =
-    config.sessionSecret ?? (enabled ? undefined : 'slipmat-unauthenticated-placeholder')
-  if (enabled && !secret) {
-    logger.warn(
-      'SLIPMAT_PASSWORD is set without SLIPMAT_SESSION_SECRET — sessions will not survive a restart',
-    )
-  }
+  // Signing the cookie means a session value can't be forged without the
+  // secret, so with none configured one is generated and kept in the database.
+  // It used to fall back to a string literal published in this file, which
+  // let anyone sign their own session cookie.
+  const secret = config.sessionSecret ?? settings.sessionSecret()
+
+  // The session value is tied to the password, so changing the password signs
+  // every existing session out.
+  const sessionValue = config.password
+    ? createHmac('sha256', secret).update(config.password).digest('base64url')
+    : undefined
 
   const cookie = await import('@fastify/cookie')
-  await app.register(cookie.default, {
-    secret: config.sessionSecret ?? 'slipmat-dev-secret',
-  })
+  await app.register(cookie.default, { secret })
 
   app.addHook('onRequest', async (request, reply) => {
     if (!isAllowedHost(request.headers.host, config.allowedHosts)) {
@@ -81,12 +129,20 @@ export async function registerAuth(app: FastifyInstance, { config, logger }: Aut
       })
     }
 
+    const route = request.routeOptions.url
+    if (isCrossSiteWrite(request, config.allowedHosts) && !route?.startsWith('/api/webhooks/')) {
+      logger.warn({ origin: request.headers.origin }, 'rejected cross-site request')
+      return reply
+        .status(403)
+        .send({ error: 'cross_site', message: 'Cross-site requests are not allowed' })
+    }
+
     if (!enabled) return
-    if (isPublicPath(request.url)) return
+    if (isPublicRoute(route)) return
 
     const session = request.cookies[SESSION_COOKIE]
     const unsigned = session ? request.unsignCookie(session) : undefined
-    if (!unsigned?.valid) {
+    if (!unsigned?.valid || unsigned.value !== sessionValue) {
       return reply.status(401).send({ error: 'unauthorized', message: 'Sign in required' })
     }
   })
@@ -104,7 +160,7 @@ export async function registerAuth(app: FastifyInstance, { config, logger }: Aut
     }
 
     return reply
-      .setCookie(SESSION_COOKIE, 'ok', {
+      .setCookie(SESSION_COOKIE, sessionValue ?? '', {
         signed: true,
         httpOnly: true,
         sameSite: 'lax',
@@ -130,4 +186,4 @@ export async function registerAuth(app: FastifyInstance, { config, logger }: Aut
   }
 }
 
-export const __testing = { isAllowedHost, isPublicPath }
+export const __testing = { isAllowedHost, isPublicRoute }

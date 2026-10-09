@@ -966,12 +966,16 @@ export class RealSonosDriver implements SonosDriver {
     path: string,
   ): Promise<{ body: ArrayBuffer; contentType: string }> {
     const device = this.requireDevice(zoneId)
-    const url = new URL(path, `http://${device.Host}:${device.Port}`)
-    const response = await fetch(url)
+    const speaker = new URL(`http://${device.Host}:${device.Port}`)
+    // `//elsewhere/x` and `/\\elsewhere/x` are both "absolute paths" that resolve
+    // to another host entirely, which made this an open proxy.
+    const url = new URL(path, speaker)
+    if (url.origin !== speaker.origin) throw new Error('Artwork path points off the speaker')
+    const response = await fetch(url, { redirect: 'error' })
     if (!response.ok) throw new Error(`Artwork fetch failed with ${response.status}`)
-    return {
-      body: await response.arrayBuffer(),
-      contentType: response.headers.get('content-type') ?? 'image/jpeg',
-    }
+    const contentType = response.headers.get('content-type') ?? 'image/jpeg'
+    // Served from our own origin, so anything but an image would run as our page.
+    if (!contentType.startsWith('image/')) throw new Error(`Artwork was ${contentType}`)
+    return { body: await response.arrayBuffer(), contentType }
   }
 }

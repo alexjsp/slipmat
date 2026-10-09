@@ -121,6 +121,7 @@ export async function registerPlaybackRoutes(
       const art = await driver.fetchArt(query.zone, query.path)
       return reply
         .header('content-type', art.contentType)
+        .header('x-content-type-options', 'nosniff')
         .header('cache-control', 'public, max-age=3600')
         .send(Buffer.from(art.body))
     } catch (err) {

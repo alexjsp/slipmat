@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isValidTimeZone } from './settings.js'
 
 const boolish = z
   .string()
@@ -39,10 +40,21 @@ const envSchema = z.object({
    * IANA timezone for evaluating time-based preset rules. Explicit, because
    * "after 21:00" silently meaning UTC only surfaces in December.
    */
-  SLIPMAT_TZ: z.string().default(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'),
+  SLIPMAT_TZ: z
+    .string()
+    // Caught here rather than on the first scheduler tick, where a typo used to
+    // mean every schedule silently stopped firing.
+    .refine(isValidTimeZone, {
+      message: 'Unknown time zone; expected an IANA name like Europe/London',
+    })
+    .default(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'),
 
   SLIPMAT_HOMEKIT: boolish,
-  SLIPMAT_HOMEKIT_PIN: z.string().default('031-45-154'),
+  /** Unset generates one on first run and keeps it; see SettingsStore.homekitPin. */
+  SLIPMAT_HOMEKIT_PIN: z
+    .string()
+    .regex(/^\d{3}-\d{2}-\d{3}$/, 'HomeKit PIN must look like 123-45-678')
+    .optional(),
   SLIPMAT_HOMEKIT_NAME: z.string().default('Slipmat'),
 })
 
@@ -60,7 +72,7 @@ export type Config = {
   allowQueueExpansion: boolean
   utilityZoneId: string | undefined
   timeZone: string
-  homekit: { enabled: boolean; pin: string; name: string }
+  homekit: { enabled: boolean; pin: string | undefined; name: string }
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -85,7 +97,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sessionSecret: parsed.SLIPMAT_SESSION_SECRET,
     allowedHosts:
       parsed.SLIPMAT_ALLOWED_HOSTS?.split(',')
-        .map((h) => h.trim())
+        // Compared against a lowercased, port-less Host, so normalise the same way.
+        .map((h) => h.trim().toLowerCase().replace(/:\d+$/, ''))
         .filter(Boolean) ?? [],
     seedIp: parsed.SLIPMAT_SEED_IP,
     callbackHost: parsed.SLIPMAT_CALLBACK_HOST,
