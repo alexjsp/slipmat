@@ -1,25 +1,60 @@
-# Slipmat
+<h1 align="center">
+  <img src="packages/web/public/slipmat.svg" width="72" alt=""><br>
+  Slipmat
+</h1>
 
-Self-hosted web app for controlling and automating a Sonos system on the local network.
+<p align="center">
+  <strong>Self-hosted control and automation for Sonos.</strong><br>
+  One tap to put the right music in the right rooms, at the right volumes.
+</p>
 
-The point of Slipmat is **presets**: named automations that group a set of speakers, set their
-volumes, and start playback of a track pool shuffled together from several playlists, albums and
-favourites. Presets can be fired from the UI, from a webhook, or from a HomeKit switch that also
-reports whether the preset is currently playing.
+<p align="center">
+  <img src="docs/images/desktop.png" alt="Slipmat's Now Playing view in a browser, showing three rooms">
+</p>
 
-It talks to Sonos entirely over the local network — no cloud, no Sonos account.
+Slipmat runs on your own server and talks to your speakers directly over the local network. There's
+no cloud and no Sonos account involved, and nothing leaves the house.
 
-> **Status:** early. See [`docs/PLAN.md`](docs/PLAN.md) for the full design and milestones.
+Its heart is **presets**. A preset groups a set of speakers, sets each one's volume, and starts a
+queue shuffled together from as many playlists, albums and favourites as you like. Start one from
+the web UI, from a webhook (Shortcuts, Stream Deck, Node-RED), on a schedule, or with a HomeKit
+switch that also shows whether it's playing.
 
-## Features
+## Everyday playback
 
-- Web UI for everyday playback: play/pause/skip/seek, per-zone volume, group and ungroup.
-- Presets that group speakers, set per-zone volumes, and play a shuffled cross-source track pool.
-- Sources: Sonos playlists, Sonos favourites, the local music library, and streaming content you
-  paste a share URL for.
-- Triggers: UI buttons, webhooks (GET or POST, so Shortcuts and Stream Deck work), and an optional
-  embedded HomeKit bridge.
-- **Pause All Music** — silences the house without touching TV audio.
+<img src="docs/images/playback.png" alt="Now Playing and the grouping sheet on a phone">
+
+- Every room on one screen, with artwork, transport controls and volume.
+- Group and ungroup rooms, and set each speaker's volume within a group.
+- **Pause all** stops the music everywhere and leaves TV audio alone.
+- Works as well on a phone as on a desktop.
+
+## Presets
+
+<img src="docs/images/presets.png" alt="The preset list, the preset editor, and the rule editor">
+
+- **Speakers and volumes**: pick the rooms, set a volume for each, and choose which one leads.
+- **Many sources, one queue**: Sonos playlists, favourites and your music library, shuffled
+  together, with duplicates removed.
+- **Rules**: change what a preset plays by day, month or time of day. Add Christmas music in
+  December, rotate through a different playlist each day, or play quieter after 9pm. The editor
+  shows what the preset would play right now.
+- **Starts fast**: sound begins within about a second, and the rest of the queue fills in behind it.
+- **Wind down**: start in every room, then carry on in just a few.
+- Optional crossfade, repeat, and pausing the rest of the house.
+
+## Sources and integrations
+
+<img src="docs/images/sources.png" alt="Pasting a streaming link as a source, and the settings page">
+
+- **Paste a link** to a Spotify or Apple Music playlist, album, artist or track.
+- **Schedules** start or stop presets at set times, with sleep timers, and can pause music when the
+  TV comes on.
+- **Webhooks** for every preset and for Pause All, using GET or POST.
+- **HomeKit**: an optional built-in bridge, with no Homebridge needed, that shows presets as
+  switches in the Home app.
+- **Blocked music**: tracks, artists or albums that should never play, whichever preset queued
+  them.
 
 ## Running it
 
@@ -99,7 +134,10 @@ Two protections apply either way:
 
 ## Development
 
-Requires Node 22+, [pnpm](https://pnpm.io) and [just](https://github.com/casey/just).
+`SLIPMAT_FAKE_SONOS=1` runs against an invented household instead of real speakers. It's what the
+screenshots above were taken from: `just readme-images` regenerates them.
+
+Requires Node 24+, [pnpm](https://pnpm.io) and [just](https://github.com/casey/just).
 
 ```sh
 just install

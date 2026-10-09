@@ -64,3 +64,8 @@ docker-down:
 
 # Personal, gitignored recipes (deploy targets and the like) live here.
 import? 'local/local.just'
+
+# Regenerate the framed README images in docs/images from the fake household.
+readme-images:
+  ./scripts/screenshots screenshots
+  pnpm --filter @slipmat/web exec tsx scripts/frame-screenshots.ts {{justfile_directory()}}/screenshots {{justfile_directory()}}/docs/images

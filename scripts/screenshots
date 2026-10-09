@@ -47,28 +47,28 @@ PRESET_A=$(api POST /api/presets '{
   "name":"Morning Kitchen","homekitEnabled":true,
   "zones":[{"zoneId":"RINCON_KITCHEN01400","volume":28,"isCoordinator":true},
            {"zoneId":"RINCON_BEDROOM01400","volume":12}],
-  "sources":[{"kind":"raw_uri","ref":"x-sonos-http:song:1.mp4","label":"Sunday Morning"},
-             {"kind":"raw_uri","ref":"x-sonos-http:song:2.mp4","label":"Chill Out"}]}' \
-  | python3 -c "import json,sys;print(json.load(sys.stdin)['preset']['id'])")
+  "sources":[{"kind":"sonos_playlist","ref":"SQ:1","label":"Sunday Morning"},
+             {"kind":"sonos_playlist","ref":"SQ:2","label":"Chill Out"}]}' \
+  | jq -r '.preset.id')
 
 api POST /api/presets '{
   "name":"Dinner Party","homekitEnabled":true,"pauseOthers":true,
   "zones":[{"zoneId":"RINCON_LIVING01400","volume":35,"isCoordinator":true},
            {"zoneId":"RINCON_OFFICE01400","volume":22}],
-  "sources":[{"kind":"raw_uri","ref":"x-sonos-http:song:3.mp4","label":"Dinner Party"}]}' >/dev/null
+  "sources":[{"kind":"sonos_playlist","ref":"SQ:3","label":"Dinner Party"}]}' >/dev/null
 
 api POST /api/presets '{
-  "name":"Radio 6 Everywhere",
+  "name":"Afternoon Radio",
   "zones":[{"zoneId":"RINCON_OFFICE01400","volume":18,"isCoordinator":true}],
-  "sources":[{"kind":"raw_uri","ref":"x-sonosapi-stream:bbc6?sid=254","label":"BBC 6 Music"}]}' >/dev/null
+  "sources":[{"kind":"sonos_favorite","ref":"FV:2/1","label":"Riverside Radio"}]}' >/dev/null
 
 api PUT "/api/presets/${PRESET_A}/rules" '{"rules":[
   {"label":"Throwback Thursday","enabled":true,"condition":{"daysOfWeek":[4]},
-   "effect":{"addSources":[{"kind":"raw_uri","ref":"x-sonos-http:song:9.mp4","label":"Throwback Hits"}]}},
+   "effect":{"addSources":[{"kind":"sonos_playlist","ref":"SQ:4","label":"Throwback Hits"}]}},
   {"label":"Christmas","enabled":true,"condition":{"months":[12]},
-   "effect":{"addSources":[{"kind":"raw_uri","ref":"x-sonos-http:song:8.mp4","label":"Christmas Classics"}]}},
+   "effect":{"addSources":[{"kind":"sonos_playlist","ref":"SQ:5","label":"Christmas Classics"}]}},
   {"label":"Wind down","enabled":true,"condition":{"timeOfDay":{"from":"21:00","to":"05:00"}},
-   "effect":{"replaceSources":[{"kind":"raw_uri","ref":"x-sonos-http:song:7.mp4","label":"Wind Down"}],
+   "effect":{"replaceSources":[{"kind":"sonos_playlist","ref":"SQ:6","label":"Wind Down"}],
              "volumeDelta":-15}}]}' >/dev/null
 
 api POST "/api/presets/${PRESET_A}/activate" '{}' >/dev/null

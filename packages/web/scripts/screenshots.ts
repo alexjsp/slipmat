@@ -27,7 +27,11 @@ async function main() {
     viewport: { width: number; height: number },
     steps: (page: import('playwright').Page) => Promise<void>,
   ) => {
-    const context = await browser.newContext({ viewport, colorScheme: 'dark' })
+    const context = await browser.newContext({
+      viewport,
+      colorScheme: 'dark',
+      deviceScaleFactor: 2,
+    })
     const page = await context.newPage()
     await page.goto(baseUrl, { waitUntil: 'networkidle' })
     await steps(page)
@@ -112,7 +116,11 @@ async function main() {
   })
 
   // Light mode: the app styles both, so it's worth proving.
-  const light = await browser.newContext({ viewport: PHONE, colorScheme: 'light' })
+  const light = await browser.newContext({
+    viewport: PHONE,
+    colorScheme: 'light',
+    deviceScaleFactor: 2,
+  })
   const lightPage = await light.newPage()
   await lightPage.goto(baseUrl, { waitUntil: 'networkidle' })
   await lightPage.evaluate(() => document.documentElement.classList.remove('dark'))
