@@ -65,7 +65,7 @@ server and pick it from **Docker → Add Container → Template**:
 
 ```sh
 wget -O /boot/config/plugins/dockerMan/templates-user/my-Slipmat.xml \
-  https://raw.githubusercontent.com/alexjsp/slipmat/main/unraid/slipmat.xml
+  https://raw.githubusercontent.com/alexjsp/unraid-community-apps/main/templates/slipmat.xml
 ```
 
 ### Docker Compose
