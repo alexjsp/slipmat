@@ -47,6 +47,8 @@ const SUBSCRIPTION_CHECK_MS = 4 * 60 * 1000
 const TOPOLOGY_REFRESH_MS = 60 * 1000
 /** Position isn't evented, so it has to be polled. The UI interpolates between. */
 const POSITION_POLL_MS = 5 * 1000
+/** How long to wait between discovery attempts while no speaker has answered. */
+const DISCOVERY_RETRY_MS = 30 * 1000
 /** Grouping is eventually consistent — how long we wait for topology to settle. */
 const TOPOLOGY_SETTLE_TIMEOUT_MS = 5000
 const PLAY_MODES: Record<DriverPlayMode, PlayMode> = {
@@ -105,6 +107,7 @@ export class RealSonosDriver implements SonosDriver {
   private readonly failedSourceUuids = new Set<string>()
 
   private timers: NodeJS.Timeout[] = []
+  private reconnectTimer: NodeJS.Timeout | undefined
   private topologyRefreshQueued = false
   private stopped = false
 
@@ -113,25 +116,54 @@ export class RealSonosDriver implements SonosDriver {
     this.logger = options.logger.child({ component: 'sonos' })
   }
 
+  /**
+   * Resolves whether or not any speaker answered.
+   *
+   * Throwing here took the whole process down, and Docker restarted it into the
+   * same failure forever: a new install whose discovery was blocked never got
+   * as far as showing a UI, and a server that booted faster than the speakers
+   * after a power cut sat in a restart loop until someone noticed. Now the API
+   * comes up reporting "not ready", which the UI already explains, and
+   * discovery keeps trying in the background.
+   */
   async start(): Promise<void> {
+    if (await this.connect()) return
+    this.logger.warn(
+      'No Sonos devices found yet; retrying in the background. Check that the container is on host networking, or set SLIPMAT_SEED_IP to a speaker address.',
+    )
+    this.scheduleReconnect()
+  }
+
+  private scheduleReconnect() {
+    if (this.stopped) return
+    this.reconnectTimer = setTimeout(() => {
+      void this.connect().then((connected) => {
+        if (connected) this.logger.info('sonos found after retrying')
+        else this.scheduleReconnect()
+      })
+    }, DISCOVERY_RETRY_MS)
+    this.reconnectTimer.unref()
+  }
+
+  private async connect(): Promise<boolean> {
     const manager = new SonosManager()
-    this.manager = manager
 
     let found = false
-    if (this.options.seedIp) {
-      this.logger.info({ seedIp: this.options.seedIp }, 'initialising from seed device')
-      found = await manager.InitializeFromDevice(this.options.seedIp)
-    } else {
-      this.logger.info('initialising via SSDP discovery')
-      found = await manager.InitializeWithDiscovery(this.options.discoveryTimeoutSeconds ?? 10)
+    try {
+      if (this.options.seedIp) {
+        this.logger.info({ seedIp: this.options.seedIp }, 'initialising from seed device')
+        found = await manager.InitializeFromDevice(this.options.seedIp)
+      } else {
+        this.logger.info('initialising via SSDP discovery')
+        found = await manager.InitializeWithDiscovery(this.options.discoveryTimeoutSeconds ?? 10)
+      }
+    } catch (err) {
+      // A discovery timeout and an unreachable seed both arrive as errors.
+      this.logger.debug({ err }, 'sonos discovery failed')
     }
+    if (!found || this.stopped) return false
 
-    if (!found) {
-      throw new Error(
-        'No Sonos devices found. Check that the container is on host networking, or set SLIPMAT_SEED_IP to a speaker address.',
-      )
-    }
-
+    this.manager = manager
     for (const device of manager.Devices) this.attach(device)
     manager.OnNewDevice((device) => {
       this.logger.info({ zone: device.Name, uuid: device.Uuid }, 'new device appeared')
@@ -148,10 +180,12 @@ export class RealSonosDriver implements SonosDriver {
       { groups: this.zoneGroups.length, devices: this.manager?.Devices.length ?? 0 },
       'sonos ready',
     )
+    return true
   }
 
   async stop(): Promise<void> {
     this.stopped = true
+    clearTimeout(this.reconnectTimer)
     for (const timer of this.timers) clearInterval(timer)
     this.timers = []
     for (const device of this.manager?.Devices ?? []) {
