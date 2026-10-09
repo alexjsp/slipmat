@@ -8,7 +8,8 @@
  *   pnpm --filter @slipmat/web exec tsx scripts/frame-screenshots.ts <shotsDir> <outDir>
  */
 import { mkdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 const shotsDir = process.argv[2] ?? './screenshots'
@@ -45,7 +46,7 @@ const browserWindow = (name: string) => `
     <img src="${dataUri(name)}" alt="">
   </div>`
 
-const page = (body: string) => `<!doctype html>
+const page = (body: string, extraCss = '') => `<!doctype html>
 <html><head><style>
   * { box-sizing: border-box; margin: 0; }
   /* Its own background, so the body's gradient paints the body box only rather
@@ -115,9 +116,39 @@ const page = (body: string) => `<!doctype html>
     transform: translateX(-28px);
   }
   .window img { display: block; width: 100%; }
+${extraCss}
 </style></head><body>${body}</body></html>`
 
+const LOGO = `data:image/svg+xml;base64,${readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '../public/slipmat.svg'),
+).toString('base64')}`
+
+/**
+ * GitHub's social preview: 2:1, and GitHub recommends 1280x640. The window
+ * runs off the right and bottom edges on purpose, so it reads as a glimpse of
+ * the app rather than a shrunken copy of it.
+ */
+const socialCard = page(
+  `<div class="pitch">
+    <img src="${LOGO}" alt="">
+    <h1>Slipmat</h1>
+    <p>Self-hosted control and automation for Sonos</p>
+  </div>
+  <div class="glimpse">${browserWindow('12-desktop-now-playing.png')}</div>`,
+  `
+  body { position: relative; width: 1280px; height: 640px; padding: 0; overflow: hidden; }
+  .pitch { position: absolute; left: 72px; top: 50%; width: 420px; transform: translateY(-50%); }
+  .pitch img { width: 96px; height: 96px; }
+  .pitch h1 { margin-top: 24px; font-size: 76px; font-weight: 700; letter-spacing: -0.03em; }
+  .pitch p { margin-top: 14px; font-size: 30px; line-height: 1.25; color: #d4d4d8; }
+  .glimpse { position: absolute; left: 560px; top: 96px; width: 1000px; }
+  /* The desktop capture centres the app in wide margins; skip the left one. */
+  .glimpse .window img { width: 128%; margin-left: -26%; }
+  `,
+)
+
 const IMAGES: { name: string; html: string }[] = [
+  { name: 'social-preview.png', html: socialCard },
   { name: 'desktop.png', html: page(browserWindow('12-desktop-now-playing.png')) },
   {
     name: 'playback.png',
