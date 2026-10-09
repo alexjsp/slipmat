@@ -6,7 +6,7 @@ import { isContainerClass, parseDidl } from './didl.js'
  * assertion here corresponds to something that actually broke against real
  * hardware, so they're worth keeping exact.
  */
-const FAVORITES_DIDL = `&lt;DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/"&gt;&lt;item id="FV:2/31" parentID="FV:2" restricted="false"&gt;&lt;dc:title&gt;Alex&amp;apos;s Chill Mix&lt;/dc:title&gt;&lt;upnp:class&gt;object.itemobject.item.sonos-favorite&lt;/upnp:class&gt;&lt;res protocolInfo="x-rincon-cpcontainer:*:*:*"&gt;x-rincon-cpcontainer:1006206clibraryplaylist%3ap.ODDB4sx0v5W&lt;/res&gt;&lt;upnp:albumArtURI&gt;http://is1.mzstatic.com/image/thumb/400x400cc.jpeg&lt;/upnp:albumArtURI&gt;&lt;r:resMD&gt;&amp;lt;DIDL-Lite&amp;gt;&amp;lt;item id=&amp;quot;1006206clibraryplaylist%3ap.ODDB4sx0v5W&amp;quot;&amp;gt;&amp;lt;desc id=&amp;quot;cdudn&amp;quot;&amp;gt;SA_RINCON52231_X_#Svc52231-decc08f-Token&amp;lt;/desc&amp;gt;&amp;lt;/item&amp;gt;&amp;lt;/DIDL-Lite&amp;gt;&lt;/r:resMD&gt;&lt;/item&gt;&lt;item id="FV:2/27" parentID="FV:2" restricted="false"&gt;&lt;dc:title&gt;BBC Radio 2&lt;/dc:title&gt;&lt;res protocolInfo="x-sonosapi-stream:*:*:*"&gt;x-sonosapi-stream:s24940?sid=333&amp;amp;flags=8224&amp;amp;sn=19&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;`
+const FAVORITES_DIDL = `&lt;DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/"&gt;&lt;item id="FV:2/31" parentID="FV:2" restricted="false"&gt;&lt;dc:title&gt;Sunday&amp;apos;s Chill Mix&lt;/dc:title&gt;&lt;upnp:class&gt;object.itemobject.item.sonos-favorite&lt;/upnp:class&gt;&lt;res protocolInfo="x-rincon-cpcontainer:*:*:*"&gt;x-rincon-cpcontainer:1006206clibraryplaylist%3ap.ODDB4sx0v5W&lt;/res&gt;&lt;upnp:albumArtURI&gt;http://is1.mzstatic.com/image/thumb/400x400cc.jpeg&lt;/upnp:albumArtURI&gt;&lt;r:resMD&gt;&amp;lt;DIDL-Lite&amp;gt;&amp;lt;item id=&amp;quot;1006206clibraryplaylist%3ap.ODDB4sx0v5W&amp;quot;&amp;gt;&amp;lt;desc id=&amp;quot;cdudn&amp;quot;&amp;gt;SA_RINCON52231_X_#Svc52231-0a1b2c3-Token&amp;lt;/desc&amp;gt;&amp;lt;/item&amp;gt;&amp;lt;/DIDL-Lite&amp;gt;&lt;/r:resMD&gt;&lt;/item&gt;&lt;item id="FV:2/27" parentID="FV:2" restricted="false"&gt;&lt;dc:title&gt;BBC Radio 2&lt;/dc:title&gt;&lt;res protocolInfo="x-sonosapi-stream:*:*:*"&gt;x-sonosapi-stream:s24940?sid=333&amp;amp;flags=8224&amp;amp;sn=19&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;`
 
 describe('parseDidl', () => {
   const entries = parseDidl(FAVORITES_DIDL)
@@ -17,7 +17,7 @@ describe('parseDidl', () => {
   })
 
   it('decodes titles', () => {
-    expect(entries[0]?.title).toBe("Alex's Chill Mix")
+    expect(entries[0]?.title).toBe("Sunday's Chill Mix")
   })
 
   it('keeps percent-encoding in res, which Sonos treats as significant', () => {
@@ -39,7 +39,7 @@ describe('parseDidl', () => {
   })
 
   it('carries the service token, without which enqueueing returns UPnP 800', () => {
-    expect(entries[0]?.resMD).toContain('SA_RINCON52231_X_#Svc52231-decc08f-Token')
+    expect(entries[0]?.resMD).toContain('SA_RINCON52231_X_#Svc52231-0a1b2c3-Token')
   })
 
   it('reports items with no res at all', () => {

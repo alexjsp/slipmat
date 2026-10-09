@@ -11,8 +11,6 @@ Slipmat is a Docker container on the LAN that owns a live picture of the Sonos s
 3. Three ways to fire a preset: UI buttons, webhooks, and (optional) HomeKit switches that also *report* whether the preset is playing and can stop it.
 4. A **Pause All Music** action that silences the house without touching TV audio.
 
-`/Users/alex/Developer/Slipmat` is an empty git repo — greenfield.
-
 ## Research outcome: build on `@svrooij/sonos`, not `node-sonos-http-api`
 
 | | `jishi/node-sonos-http-api` | `svrooij/node-sonos-ts` (`@svrooij/sonos`) |
@@ -218,9 +216,9 @@ Transport only — starting *content* always goes through a preset.
 - `/settings` — password, HomeKit pairing, discovery seed IP, utility zone, cache controls, logs.
 
 ## Packaging & deploy
-Mirrors `~/Developer/euroscores`: `compose.yml` (Unraid paths under `/mnt/user/appdata/slipmat`, `network_mode: host`), `compose.local.yml` for dev, a `justfile`, and `scripts/deploy-unraid` that rsyncs sources to `root@unraid.jsp.scot:/mnt/user/appdata/slipmat_source`, builds remotely and `docker compose up -d`. Nothing Unraid-specific in the image itself — a plain `docker run --network host -v ./data:/data ghcr.io/…/slipmat` works anywhere.
+`compose.yml` (`network_mode: host`, the published image, a `./data` volume), `compose.local.yml` for dev, and a `justfile`. Nothing host-specific in the image itself — a plain `docker run --network host -v ./data:/data ghcr.io/…/slipmat` works anywhere, and an Unraid Community Applications template wraps the same thing.
 
-`just` recipes: `dev`, `test`, `lint`, `build`, `docker-dev`, `deploy-unraid`.
+`just` recipes: `dev`, `test`, `lint`, `build`, `docker-dev`.
 
 ## Milestones
 - **M0** monorepo, Dockerfile, compose, justfile, CI, shadcn baseline.
@@ -231,7 +229,7 @@ Mirrors `~/Developer/euroscores`: `compose.yml` (Unraid paths under `/mnt/user/a
 - **M5** preset UI + editor.
 - **M6** webhooks, active-state computation, stop/restart, Pause All Music.
 - **M7** embedded HomeKit bridge behind `SLIPMAT_HOMEKIT=1`.
-- **M8** auth, GHCR multi-arch image, deploy script, README.
+- **M8** auth, GHCR multi-arch image, README.
 - **M9** conditional rules — pure `evaluateRules` + tests, `preset_rules` table, rule editor with a live "right now" preview.
 
 ## Risks
@@ -250,4 +248,4 @@ Mirrors `~/Developer/euroscores`: `compose.yml` (Unraid paths under `/mnt/user/a
 - Pause in the Sonos app → UI badge and HomeKit switch both go off within a couple of seconds.
 - Music in two rooms **and** the TV on the soundbar → Pause All Music from UI, webhook and HomeKit: music stops, TV audio keeps playing.
 - Run once with `SLIPMAT_HOMEKIT` unset (nothing on mDNS, everything else works), then set: pair in the Home app, toggle a preset switch both ways, confirm state after activating that preset from the web UI instead.
-- `just deploy-unraid`, then the full flow against the Unraid instance with a clean `/data` volume.
+- The full flow against a freshly deployed container with a clean `/data` volume.

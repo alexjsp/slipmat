@@ -10,8 +10,8 @@ real, on-network Sonos speakers unless explicitly asked, or you have specific pe
 run.** This includes: starting or stopping playback, changing volume or mute, grouping or
 ungrouping, modifying queues, saving or deleting Sonos playlists, and setting play modes.
 
-- Automated tests run against the **fake Sonos layer** (`packages/server/src/sonos/fake/`) only.
-  Never point a test suite at a real household.
+- Automated tests run against the **fake Sonos layer** (`packages/server/src/sonos/fake-driver.ts`)
+  only. Never point a test suite at a real household.
 - Read-only inspection of a real system (discovery, `Browse`, reading transport/volume state) is
   fine and does not need permission.
 - Anything that mutates a real speaker — including the scratch-queue expansion used by the source

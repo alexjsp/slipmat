@@ -13,3 +13,6 @@ coverage/
 packages/server/public/
 screenshot.png
 screenshots/
+
+# Personal, machine-specific files: deploy scripts, private compose overrides.
+local/

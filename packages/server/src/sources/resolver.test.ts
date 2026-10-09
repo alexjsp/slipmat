@@ -80,7 +80,7 @@ describe('SourceResolver', () => {
     // Sonos strips the token from the queue entries it expands a container
     // into. Without carrying it across, the tracks play but the Sonos app can
     // only describe them as "No Content".
-    const token = 'SA_RINCON52231_X_#Svc52231-decc08f-Token'
+    const token = 'SA_RINCON52231_X_#Svc52231-0a1b2c3-Token'
     const containerUri = 'x-rincon-cpcontainer:1006206clibraryplaylist%3ap.abc?sid=204&flags=8300'
     driver.setBrowseResult('FV:2', [
       {

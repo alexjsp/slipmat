@@ -65,7 +65,7 @@ describe('asMetadataDocument', () => {
 })
 
 const TRACK_URI = 'x-sonos-http:librarytrack%3aa.1440913387.mp4?sid=204&flags=8232&sn=2'
-const TOKEN = 'SA_RINCON52231_X_#Svc52231-decc08f-Token'
+const TOKEN = 'SA_RINCON52231_X_#Svc52231-0a1b2c3-Token'
 
 describe('serviceItemId', () => {
   it('derives the object id from the stream URI', () => {
