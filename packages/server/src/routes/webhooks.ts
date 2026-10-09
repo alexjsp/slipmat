@@ -1,5 +1,5 @@
 import { blocklistSchema } from '@slipmat/shared'
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { ActivationEngine } from '../presets/activate.js'
 import { pauseAllMusic } from '../presets/pause-all.js'
@@ -63,6 +63,11 @@ export async function registerWebhookRoutes(app: FastifyInstance, deps: WebhookR
     app.route({
       method,
       url: '/api/webhooks/:token',
+      // The token is the webhook's only secret, and the default request log
+      // line would otherwise write it out on every call. Fastify honours
+      // route-level serializers but only types them on `register`, hence the
+      // spread.
+      ...({ logSerializers: { req: serializeRedactedRequest } } as object),
       handler: async (request, reply) => {
         const { token } = tokenParamsSchema.parse(request.params)
         const { action } = actionQuerySchema.parse(request.query)
@@ -127,4 +132,15 @@ export async function registerWebhookRoutes(app: FastifyInstance, deps: WebhookR
     deps.settings.setBlocklist(body.rules)
     return { rules: deps.settings.blocklist() }
   })
+}
+
+/** Fastify's default request serializer, minus the token in the path. */
+function serializeRedactedRequest(request: FastifyRequest) {
+  return {
+    method: request.method,
+    url: request.url.replace(/^\/api\/webhooks\/[^/?#]+/, '/api/webhooks/[redacted]'),
+    host: request.host,
+    remoteAddress: request.ip,
+    remotePort: request.socket?.remotePort,
+  }
 }
